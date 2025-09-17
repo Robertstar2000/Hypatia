@@ -652,7 +652,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
 
                     <div className="row align-items-center">
                          <div className="col-lg-6 text-center order-lg-2">
-                            <img src="https://images.unsplash.com/photo-1581093458791-9a6680c18e3e?q=80&w=2070&auto=format&fit=crop" alt="Scientist in a modern lab looking at data on a computer screen" className="researcher-image" />
+                            <img src="https://images.unsplash.com/photo-1554475901-4538ddfbccc2?q=80&w=2072&auto=format=fit=crop" alt="Scientist in a dark lab examining glowing blue liquids in test tubes" className="researcher-image" />
                         </div>
                         <div className="col-lg-6 order-lg-1">
                              <h2 className="section-title mb-3">From Idea to Publication</h2>
@@ -1102,8 +1102,9 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
                             type="range"
                             className="form-range"
                             min={param.min} max={param.max} step={param.step}
-                            // FIX: The value prop for a range input expects a number, but it could be a string from state. Explicitly cast to Number.
-                            value={Number(value)}
+                            // FIX: The value from state can be a non-numeric string, resulting in NaN.
+                            // Coerce to a number and default to the minimum if it's not a finite number.
+                            value={Number.isFinite(Number(value)) ? Number(value) : param.min}
                             onChange={e => setTempSettings(s => ({ ...s, [param.name]: parseFloat(e.target.value) }))}
                         />
                         <span className="ms-3 fw-bold">{value}</span>
@@ -1239,7 +1240,9 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
                     if (dataset.data) {
                         dataset.data = dataset.data.map(d => (typeof d === 'string' ? parseFloat(d) : d)).filter(d => d !== null && !isNaN(d));
                     }
-                    if (dataset.borderWidth && typeof dataset.borderWidth === 'string') {
+                    // FIX: A truthiness check `if (dataset.borderWidth...` fails for `borderWidth: 0`.
+                    // Using `!= null` ensures `0` is handled correctly but `null` and `undefined` are skipped.
+                    if (dataset.borderWidth != null && typeof dataset.borderWidth === 'string') {
                         dataset.borderWidth = parseFloat(dataset.borderWidth);
                     }
                 });

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
@@ -38,7 +39,7 @@ const SCIENTIFIC_FIELDS = [
     'Geology',
     'Mathematics',
     'Artificial Intelligence'
-];
+].sort();
 
 
 // --- DATA INTERFACES ---
@@ -161,7 +162,6 @@ const STEP_SPECIFIC_TUNING_PARAMETERS = {
     1: [
         { name: 'scope', label: 'Scope', type: 'select', options: ['Broad', 'Specific', 'Niche'], default: 'Specific', description: 'Define the breadth of the research question.' },
         { name: 'questionType', label: 'Question Type', type: 'select', options: ['Descriptive', 'Comparative', 'Relational'], default: 'Comparative', description: 'The nature of the question (e.g., what is vs. is x better than y).' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'clarity', label: 'Clarity', type: 'range', min: 0.5, max: 1.0, step: 0.1, default: 0.8, description: 'How precise and unambiguous the question should be.' },
         { name: 'testability', label: 'Testability', type: 'boolean', default: true, description: 'Ensure the question can be practically tested.' },
     ],
@@ -169,20 +169,16 @@ const STEP_SPECIFIC_TUNING_PARAMETERS = {
         { name: 'sourceRecency', label: 'Source Recency', type: 'select', options: ['Last Year', 'Last 5 Years', 'Any Time'], default: 'Last 5 Years', description: 'Filter sources by publication date.' },
         { name: 'summaryLength', label: 'Summary Length', type: 'select', options: ['Brief', 'Standard', 'Detailed'], default: 'Standard', description: 'The level of detail for the literature summary.' },
         { name: 'focus', label: 'Focus Area', type: 'select', options: ['Key Findings', 'Methodologies', 'Gaps in Research'], default: 'Gaps in Research', description: 'The main emphasis of the review.' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'sourceCount', label: 'Number of Sources', type: 'range', min: 3, max: 8, step: 1, default: 5, description: 'How many key sources to identify and cite.' },
     ],
     3: [
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'hypothesisCount', label: 'Number of Hypotheses', type: 'range', min: 1, max: 5, step: 1, default: 3, description: 'How many distinct hypotheses to generate.' },
         { name: 'style', label: 'Hypothesis Style', type: 'select', options: ['If/Then Statement', 'Null/Alternative Pair', 'Directional Prediction'], default: 'Directional Prediction', description: 'The format for presenting the hypotheses.' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'novelty', label: 'Novelty', type: 'range', min: 0.2, max: 1.0, step: 0.1, default: 0.6, description: 'How conventional or groundbreaking the hypotheses should be.' },
         { name: 'includeReasoning', label: 'Include Reasoning', type: 'boolean', default: true, description: 'Whether to include a brief justification for each hypothesis.' },
     ],
     4: [
         { name: 'detailLevel', label: 'Level of Detail', type: 'select', options: ['High-level Overview', 'Standard Protocol', 'Granular Step-by-Step'], default: 'Standard Protocol', description: 'The granularity of the methodology description.' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'rigor', label: 'Methodological Rigor', type: 'range', min: 0.5, max: 1.0, step: 0.1, default: 0.8, description: 'The level of scientific control and precision in the design.' },
         { name: 'focusOn', label: 'Primary Focus', type: 'select', options: ['Internal Validity', 'External Validity', 'Feasibility'], default: 'Internal Validity', description: 'Prioritize one aspect of the study design.' },
         { name: 'includeContingencies', label: 'Include Contingencies', type: 'boolean', default: false, description: 'Plan for potential issues or alternative procedures.' },
@@ -214,17 +210,55 @@ const STEP_SPECIFIC_TUNING_PARAMETERS = {
     9: [
         { name: 'reviewerPersona', label: 'Reviewer Persona', type: 'select', options: ['Supportive Colleague', 'Harsh Critic', 'Methodology Expert', 'Big Picture Thinker'], default: 'Harsh Critic', description: 'The personality of the simulated peer reviewer.' },
         { name: 'reviewFocus', label: 'Review Focus', type: 'select', options: ['Logical Cohesion', 'Statistical Rigor', 'Novelty & Impact', 'Clarity of Writing'], default: 'Statistical Rigor', description: 'The main area the reviewer should critique.' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'constructiveness', label: 'Constructiveness', type: 'range', min: 0.2, max: 1.0, step: 0.1, default: 0.8, description: 'How constructive vs. purely critical the feedback is.' },
         { name: 'includeActionableSuggestions', label: 'Include Suggestions', type: 'boolean', default: true, description: 'Provide concrete suggestions for improvement.' },
     ],
     10: [
         { name: 'targetJournalStyle', label: 'Target Journal Style', type: 'select', options: ['Nature (Concise)', 'PLOS ONE (Comprehensive)', 'Generic Academic'], default: 'Generic Academic', description: 'Emulate the style of a specific type of journal.' },
-        // FIX: The default value for a range input must be a number, not a string, to prevent type errors.
         { name: 'abstractLength', label: 'Abstract Length (words)', type: 'range', min: 150, max: 300, step: 10, default: 250, description: 'The target word count for the abstract.' },
         { name: 'emphasis', label: 'Paper Emphasis', type: 'select', options: ['Results & Data', 'Narrative & Impact', 'Methodological Detail'], default: 'Narrative & Impact', description: 'Which aspect of the research to highlight most prominently.' },
         { name: 'includeReferences', label: 'Include Placeholder References', type: 'boolean', default: true, description: 'Generate a list of placeholder references.' },
     ]
+};
+
+const DATA_ANALYZER_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        summary: {
+            type: Type.STRING,
+            description: "A one-paragraph summary of the analysis findings, formatted as Markdown. This will be displayed above the chart.",
+        },
+        chartSuggestions: {
+            type: Type.ARRAY,
+            description: "An array of up to three different and relevant chart suggestions. The first suggestion should be the most appropriate visualization.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    type: { type: Type.STRING, description: "The type of chart, e.g., 'bar', 'line', 'scatter'." },
+                    data: {
+                        type: Type.OBJECT,
+                        properties: {
+                            labels: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            datasets: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        label: { type: Type.STRING },
+                                        data: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+                                        backgroundColor: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                        borderColor: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                        borderWidth: { type: Type.NUMBER },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    options: { type: Type.OBJECT },
+                },
+            },
+        },
+    },
 };
 
 
@@ -299,30 +333,8 @@ Your output must be structured in Markdown and include the following sections:
         case 7:
             expectJson = true;
             basePrompt = `Analyze the following data: "${userInput}". The research hypothesis is: "${context.hypothesis}". The methodology was: "${context.methodology}".
-Your task is to perform a statistical analysis.
-Your entire response MUST be a single, valid JSON object and nothing else.
-Do not include markdown backticks like \`\`\`json, any introductory text, or any explanations. Your output will be directly processed by a machine, so any extraneous text will cause a critical failure.
-The JSON object must strictly adhere to the following schema:
-{
-  "summary": "string (A one-paragraph summary of your analysis findings, formatted as Markdown. This will be displayed above the chart.)",
-  "chartConfig": {
-    "type": "string (e.g., 'bar', 'line', 'pie')",
-    "data": {
-      "labels": "string[]",
-      "datasets": [
-        {
-          "label": "string",
-          "data": "number[]",
-          "backgroundColor": "string[] (optional)",
-          "borderColor": "string[] (optional)",
-          "borderWidth": "number (optional)"
-        }
-      ]
-    },
-    "options": "object (Chart.js options object, optional)"
-  }
-}
-`;
+Your task is to perform a statistical analysis and suggest appropriate visualizations.
+Your entire response must be a single, valid JSON object that strictly adheres to the provided schema. Do not include markdown backticks, any introductory text, or any explanations.`;
             break;
         case 8:
             basePrompt = `The research question was: "${context.question}". The hypothesis was: "${context.hypothesis}". The data analysis results are summarized as: "${context.analysis_summary}". Based on this analysis, draw a clear and concise conclusion. State whether the hypothesis was supported, refuted, or if the results were inconclusive. Discuss the implications of these findings, potential limitations of the study, and suggest directions for future research.`;
@@ -337,13 +349,24 @@ The JSON object must strictly adhere to the following schema:
 Critique the study's design, methodology, and the validity of its conclusions. Point out any logical fallacies, potential biases, or areas where the research could be strengthened. Format your review into sections: Strengths, Weaknesses, and Suggestions for Improvement.`;
             break;
         case 10:
-            basePrompt = `Generate a draft for a scientific publication based on the entire research project. The paper should be structured with the following sections: Abstract, Introduction (containing the research question), Literature Review, Methodology, Results (based on the analysis summary), Discussion (including conclusions and limitations), and Future Work. Use the context provided below to fill in each section.
+            basePrompt = `Generate a draft for a scientific publication based on the entire research project. The paper should be structured with the following sections: Abstract, Introduction (containing the research question), Literature Review, Methodology, Results, Discussion (including conclusions and limitations), and Future Work. Use the context provided below to fill in each section.
+
 - Research Question: "${context.question}"
 - Literature Review Summary: "${context.literature_review}"
 - Hypothesis: "${context.hypothesis}"
 - Methodology: "${context.methodology}"
-- Results & Analysis Summary: "${context.analysis_summary}"
-- Conclusion: "${context.conclusion}"`;
+- Results & Analysis Summary (from Step 7): "${context.analysis_summary}"
+- Conclusion: "${context.conclusion}"
+
+**IMPORTANT INSTRUCTIONS FOR THE 'RESULTS' SECTION:**
+The "Results & Analysis Summary" field contains a JSON object. You MUST parse this JSON.
+1. Use the 'summary' field from the JSON to write the main narrative of the results.
+2. The JSON also contains a 'chartSuggestions' array. For each chart object in this array, you MUST generate a proper figure reference in Markdown.
+3. Assign a sequential figure number (e.g., Figure 1, Figure 2).
+4. Use the chart's 'type' and the dataset 'label' to create a descriptive caption.
+5. Format it like this: **Figure [Number]: [A descriptive title for the chart, e.g., 'Bar chart showing \${dataset.label}'].**
+6. You MUST refer to each figure number in the text of the Results section (e.g., "As shown in Figure 1, the data indicates...").
+7. Do not try to render the chart itself, just create the Markdown text placeholder and caption for it.`;
             break;
         default:
             basePrompt = `An unknown step was requested. Please check the application logic.`;
@@ -543,8 +566,8 @@ const LandingPage = ({ setView, createNewExperiment }) => {
         <div>
             <section className="landing-page-hero">
                 <div className="landing-content">
-                    <h1 className="display-4 landing-title">Unlock Your Next Discovery</h1>
-                    <p className="lead landing-subtitle mb-4">Project Hypatia is your AI-powered partner in scientific research, guiding you from initial question to final publication.</p>
+                    <h1 className="display-4 landing-title">Project Hypatia</h1>
+                    <p className="lead landing-subtitle mb-4">Project Hypatia is your AI-powered partner in scientific research, guiding you from initial question to the mock publication of a draft scientific paper.</p>
 
                     <div className="row justify-content-center g-3 mb-4">
                         <div className="col-md-4">
@@ -588,7 +611,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                     </div>
 
                     <p className="mt-4 text-white-50 small">
-                        Perfect for Researchers, Students, Citizen Scientists, and Innovators.
+                        An Application for ideation and to be used by Students, Scientists, Engineers, Lay Scientists and Anyone who wants to explore new ideas.
                     </p>
                 </div>
             </section>
@@ -628,7 +651,10 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                     <hr className="landing-divider" />
 
                     <div className="row align-items-center">
-                        <div className="col-lg-6">
+                         <div className="col-lg-6 text-center order-lg-2">
+                            <img src="https://images.unsplash.com/photo-1581093458791-9a6680c18e3e?q=80&w=2070&auto=format&fit=crop" alt="Scientist in a modern lab looking at data on a computer screen" className="researcher-image" />
+                        </div>
+                        <div className="col-lg-6 order-lg-1">
                              <h2 className="section-title mb-3">From Idea to Publication</h2>
                              <p className="text-white-50 mb-4">Project Hypatia provides all the tools you need to take your research from a nascent idea to a polished, publication-ready paper. The integrated workflow ensures that each step logically builds on the last, creating a cohesive and comprehensive research narrative.</p>
                              <ul className="list-unstyled">
@@ -637,8 +663,23 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                                 <li className="mb-3 d-flex align-items-center"><i className="bi bi-check-circle-fill text-primary-glow me-2"></i><span>Simulate peer review to strengthen your arguments.</span></li>
                              </ul>
                         </div>
-                         <div className="col-lg-6 text-center">
-                            <img src="https://images.unsplash.com/photo-1581093458791-9a6680c18e3e?q=80&w=2070&auto=format&fit=crop" alt="Scientist in a modern lab looking at data on a computer screen" className="researcher-image" />
+                    </div>
+
+                    <hr className="landing-divider" />
+
+                    <div className="row align-items-center">
+                        <div className="col-lg-6 text-center">
+                           <i className="bi bi-person-gear display-1 text-primary-glow" style={{fontSize: '6rem'}}></i>
+                        </div>
+                        <div className="col-lg-6">
+                            <h2 className="section-title mb-3">Our Research Philosophy</h2>
+                            <p className="lead fw-bold text-white">Human-Mediated Agentic Process (HMAP)</p>
+                            <p className="text-white-50 mb-4">
+                                A systematic framework for structuring collaboration between human researchers and AI agents throughout the complete research lifecycle, enhancing quality while preserving human agency.
+                            </p>
+                            <a href="https://github.com/Robertstar2000/HMAP?tab=readme-ov-file" target="_blank" rel="noopener noreferrer" className="btn btn-outline-light">
+                                <i className="bi bi-box-arrow-up-right me-2"></i> Learn More about HMAP
+                            </a>
                         </div>
                     </div>
 
@@ -849,6 +890,9 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
 
             // For JSON mode, use generateContent, not streaming
             if (expectJson) {
+                config.responseMimeType = "application/json";
+                config.responseSchema = DATA_ANALYZER_SCHEMA;
+
                 const response = await gemini.models.generateContent({
                     model: 'gemini-2.5-flash',
                     contents: basePrompt,
@@ -980,7 +1024,7 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
                                     <label className="form-label fw-bold">Input</label>
                                     <textarea
                                         className="form-control"
-                                        rows="4"
+                                        rows={4}
                                         value={userInput}
                                         onChange={(e) => setUserInput(e.target.value)}
                                         placeholder={isStepCompleted ? "This step is completed. Input is locked." : "Enter your notes, data, or prompt for this step..."}
@@ -1058,9 +1102,8 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
                             type="range"
                             className="form-range"
                             min={param.min} max={param.max} step={param.step}
-                            // FIX: Ensure value passed to range input is a number to avoid type errors.
+                            // FIX: The value prop for a range input expects a number, but it could be a string from state. Explicitly cast to Number.
                             value={Number(value)}
-                            // FIX: Parse the range input value to a number to prevent type errors.
                             onChange={e => setTempSettings(s => ({ ...s, [param.name]: parseFloat(e.target.value) }))}
                         />
                         <span className="ms-3 fw-bold">{value}</span>
@@ -1117,6 +1160,7 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
     const [editedOutput, setEditedOutput] = useState(output);
     const [analysis, setAnalysis] = useState(null);
     const [parseError, setParseError] = useState(null);
+    const [selectedChartIndex, setSelectedChartIndex] = useState(0);
     const chartCanvasRef = useRef(null);
     const chartInstanceRef = useRef(null);
 
@@ -1129,14 +1173,12 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
         setIsEditing(false);
     };
 
-    // Special rendering logic for Step 7 (Data Analyzer)
+    // Effect for parsing Step 7 (Data Analyzer) output
     useEffect(() => {
-        if (stepId !== 7) return;
-
-        // Cleanup previous chart instance if it exists
-        if (chartInstanceRef.current) {
-            chartInstanceRef.current.destroy();
-            chartInstanceRef.current = null;
+        if (stepId !== 7) {
+            // Clear analysis state if we move away from step 7
+            if (analysis) setAnalysis(null);
+            return;
         }
 
         if (!output) {
@@ -1154,15 +1196,16 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
 
             const parsedData = JSON.parse(jsonString);
 
-            // Validate the structure of the parsed JSON.
+            // Validate the new structure of the parsed JSON.
             if (!parsedData.summary || typeof parsedData.summary !== 'string') {
                 throw new Error("The 'summary' field is missing or not a string.");
             }
-            if (!parsedData.chartConfig || typeof parsedData.chartConfig !== 'object') {
-                throw new Error("The 'chartConfig' field is missing or not an object.");
+            if (!parsedData.chartSuggestions || !Array.isArray(parsedData.chartSuggestions) || parsedData.chartSuggestions.length === 0) {
+                 throw new Error("The 'chartSuggestions' field is missing, not an array, or is empty.");
             }
 
             setAnalysis(parsedData);
+            setSelectedChartIndex(0); // Reset to the first suggested chart
             setParseError(null);
         } catch (error) {
             console.error("Data Analyzer Parse Error:", error);
@@ -1171,32 +1214,43 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
         }
     }, [output, stepId]);
 
-    // Effect for rendering the Chart.js chart
+    // Effect for rendering the Chart.js chart for Step 7
     useEffect(() => {
-        if (stepId !== 7) return;
-
-        if (analysis && chartCanvasRef.current) {
-            try {
-                // FIX: Ensure data values are numbers, as AI might return them as strings in JSON which would cause a rendering error.
-                if (analysis.chartConfig?.data?.datasets) {
-                    analysis.chartConfig.data.datasets.forEach(dataset => {
-                        if (dataset.data) {
-                            dataset.data = dataset.data.map(d => (typeof d === 'string' ? parseFloat(d) : d)).filter(d => d !== null && !isNaN(d));
-                        }
-                        // FIX: Ensure borderWidth is a number, as AI might return it as a string.
-                        if (dataset.borderWidth && typeof dataset.borderWidth === 'string') {
-                            dataset.borderWidth = parseFloat(dataset.borderWidth);
-                        }
-                    });
-                }
-                chartInstanceRef.current = new Chart(chartCanvasRef.current, analysis.chartConfig);
-            } catch (chartError) {
-                console.error("Chart.js Error:", chartError);
-                setParseError(`The chart configuration from the AI was invalid. Details: ${chartError.message}`);
-                setAnalysis(null); // Clear analysis to remove potentially rendered summary
-            }
+        // Always clean up the previous chart instance first.
+        if (chartInstanceRef.current) {
+            chartInstanceRef.current.destroy();
+            chartInstanceRef.current = null;
         }
-    }, [analysis, stepId]);
+        
+        if (stepId !== 7 || !analysis || !chartCanvasRef.current) {
+            return;
+        }
+
+        try {
+            // FIX: Deep copy the chart config to avoid mutating state and to loosen type constraints.
+            const chartConfig = JSON.parse(JSON.stringify(analysis.chartSuggestions[selectedChartIndex]));
+            
+            if (!chartConfig) {
+                 throw new Error(`Selected chart configuration (index ${selectedChartIndex}) is invalid or missing.`);
+            }
+            
+            if (chartConfig.data?.datasets) {
+                chartConfig.data.datasets.forEach(dataset => {
+                    if (dataset.data) {
+                        dataset.data = dataset.data.map(d => (typeof d === 'string' ? parseFloat(d) : d)).filter(d => d !== null && !isNaN(d));
+                    }
+                    if (dataset.borderWidth && typeof dataset.borderWidth === 'string') {
+                        dataset.borderWidth = parseFloat(dataset.borderWidth);
+                    }
+                });
+            }
+            chartInstanceRef.current = new Chart(chartCanvasRef.current, chartConfig);
+        } catch (chartError) {
+            console.error("Chart.js Error:", chartError);
+            setParseError(`The chart configuration from the AI was invalid. Details: ${chartError.message}`);
+        }
+        
+    }, [analysis, selectedChartIndex, stepId]);
 
 
     if (isEditing) {
@@ -1237,10 +1291,24 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
                     </div>
                 )}
 
-                {analysis && !parseError && (
+                {analysis && (
                     <>
                         <div dangerouslySetInnerHTML={{ __html: marked(analysis.summary) }} />
-                        <div className="mt-4">
+                        <div className="my-4 d-flex justify-content-center align-items-center flex-wrap gap-2">
+                             <span className="me-2 text-white-50 small">Suggested Visualizations:</span>
+                             {analysis.chartSuggestions.map((chart, index) => (
+                                <button
+                                    key={index}
+                                    type="button"
+                                    className={`btn btn-sm text-capitalize ${selectedChartIndex === index ? 'btn-primary' : 'btn-outline-secondary'}`}
+                                    onClick={() => setSelectedChartIndex(index)}
+                                    aria-pressed={selectedChartIndex === index}
+                                >
+                                    {chart.type} Chart
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-2">
                             <canvas ref={chartCanvasRef} aria-label="Data analysis chart" role="img"></canvas>
                         </div>
                     </>
@@ -1593,12 +1661,127 @@ hypatia.finish(csvData, summaryText);
     );
 };
 
-const PublicationExporter = ({ experiment, onGenerate, isLoading, output, onSaveOutput }) => {
-    const sections = ['Abstract', 'Introduction', 'Literature Review', 'Methodology', 'Results', 'Discussion', 'Future Work'];
-    const [generatedSections, setGeneratedSections] = useState({});
+const CommentsModal = ({ experiment, onClose }) => {
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        phone: '',
+        comments: '',
+        rating: 'useful',
+    });
+    const { addToast } = useToast();
 
-    // This is a simplified approach. A real implementation might generate section by section.
-    // For now, we trigger one large generation.
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const subject = `Feedback on Hypatia Experiment: ${experiment.title}`;
+        const body = `
+Experiment Title: ${experiment.title}
+Experiment Description: ${experiment.description}
+Date: ${new Date().toLocaleDateString()}
+-----------------------------------------
+
+Name: ${formData.name}
+Email: ${formData.email}
+Phone: ${formData.phone}
+
+Overall Rating: ${formData.rating}
+
+Comments:
+${formData.comments}
+        `;
+
+        const mailtoLink = `mailto:mifecoinc@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.trim())}`;
+        
+        try {
+            window.location.href = mailtoLink;
+            addToast("Your email client has been opened to send feedback.", 'info');
+        } catch (error) {
+            console.error("Failed to open mailto link:", error);
+            addToast("Could not open email client. Please copy the details manually.", 'danger');
+        }
+
+        onClose();
+    };
+
+    return (
+        <div className="modal show" style={{ display: 'block' }} tabIndex="-1">
+            <div className="modal-dialog modal-dialog-centered">
+                <div className="modal-content">
+                    <form onSubmit={handleSubmit}>
+                        <div className="modal-header">
+                            <h5 className="modal-title">Send Comments & Feedback</h5>
+                            <button type="button" className="btn-close" onClick={onClose}></button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="mb-3">
+                                <label className="form-label small text-white-50">Experiment Title</label>
+                                <input type="text" className="form-control" value={experiment.title} readOnly disabled />
+                            </div>
+                             <div className="mb-3">
+                                <label className="form-label small text-white-50">Experiment Description</label>
+                                <textarea className="form-control" value={experiment.description} readOnly disabled rows="2"></textarea>
+                            </div>
+                            <hr />
+                            <div className="mb-3">
+                                <label className="form-label">Overall Rating</label>
+                                <div className="d-flex justify-content-around flex-wrap pt-2">
+                                    {['worthless', 'just OK', 'useful', 'fabulous'].map(val => (
+                                        <div className="form-check" key={val}>
+                                            <input
+                                                className="form-check-input"
+                                                type="radio"
+                                                name="rating"
+                                                id={`rating-${val}`}
+                                                value={val}
+                                                checked={formData.rating === val}
+                                                onChange={handleChange}
+                                            />
+                                            <label className="form-check-label text-capitalize" htmlFor={`rating-${val}`}>
+                                                {val}
+                                            </label>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                             <div className="mb-3">
+                                <label className="form-label">Your Name</label>
+                                <input type="text" className="form-control" name="name" value={formData.name} onChange={handleChange} required />
+                            </div>
+                            <div className="mb-3">
+                                <label className="form-label">Your Email</label>
+                                <input type="email" className="form-control" name="email" value={formData.email} onChange={handleChange} required />
+                            </div>
+                            <div className="mb-3">
+                                <label className="form-label">Your Phone (Optional)</label>
+                                <input type="tel" className="form-control" name="phone" value={formData.phone} onChange={handleChange} />
+                            </div>
+                             <div className="mb-3">
+                                <label className="form-label">Comments / Feedback</label>
+                                <textarea className="form-control" name="comments" value={formData.comments} onChange={handleChange} required rows="4"></textarea>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                            <button type="submit" className="btn btn-primary">
+                                <i className="bi bi-send me-2"></i>Send via Email Client
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div className="modal-backdrop fade show"></div>
+        </div>
+    );
+};
+
+
+const PublicationExporter = ({ experiment, onGenerate, isLoading, output, onSaveOutput }) => {
+    const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
 
     const handleExport = (format) => {
         let content = ``;
@@ -1640,17 +1823,21 @@ const PublicationExporter = ({ experiment, onGenerate, isLoading, output, onSave
             )}
             {output && (
                 <>
-                    <div className="d-flex justify-content-end mb-3">
-                         <button className="btn btn-sm btn-outline-light me-2" onClick={() => handleExport('markdown')}>
+                    <div className="d-flex justify-content-end flex-wrap gap-2 mb-3">
+                         <button className="btn btn-sm btn-outline-light" onClick={() => handleExport('markdown')}>
                             <i className="bi bi-filetype-md me-1"></i> Export as Markdown
                         </button>
                          <button className="btn btn-sm btn-outline-light" onClick={() => handleExport('text')}>
                             <i className="bi bi-file-text me-1"></i> Export as Text
                         </button>
+                        <button className="btn btn-sm btn-outline-info" onClick={() => setIsCommentsModalOpen(true)}>
+                            <i className="bi bi-chat-right-text me-1"></i> Send Comments
+                        </button>
                     </div>
                      <GeneratedOutput output={output} stepId={10} onSave={onSaveOutput} isEditable={!isLoading} />
                 </>
             )}
+            {isCommentsModalOpen && <CommentsModal experiment={experiment} onClose={() => setIsCommentsModalOpen(false)} />}
         </div>
     );
 };

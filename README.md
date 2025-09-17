@@ -21,14 +21,12 @@
 
 ---
 
-Project Hypatia is your digital lab partner, an AI-powered platform designed to assist researchers, students, and citizen scientists throughout the entire scientific discovery process. It provides a structured, 10-step workflow, leveraging the Google Gemini API to streamline every stage of research, from question formulation to a publication-ready draft.
-
-<br>
-
 ## Table of Contents
 
 - [About The Project](#about-the-project)
 - [Key Features](#key-features)
+- [The HMAP Philosophy](#the-hmap-philosophy-human-mediated-agentic-process)
+- [The Scientific Method & Hypatia](#the-scientific-method--hypatia)
 - [Technology Stack](#technology-stack)
 - [Getting Started](#getting-started)
 - [Usage Guide](#usage-guide)
@@ -42,7 +40,7 @@ Project Hypatia is your digital lab partner, an AI-powered platform designed to 
 
 ## About The Project
 
-Project Hypatia empowers researchers by providing an intuitive, AI-driven platform that accelerates discovery, fosters innovation, and enhances the quality of research. It acts as a comprehensive digital lab notebook, guiding users from an initial spark of an idea to a fully-formed publication draft, all within a single, cohesive interface. The goal is to democratize the research process, offering a structured yet flexible environment for scientific exploration.
+Project Hypatia is your digital lab partner, an AI-powered platform designed to assist researchers, students, and citizen scientists throughout the entire scientific discovery process. It provides a structured, 10-step workflow, leveraging the Google Gemini API to streamline every stage of research, from question formulation to a publication-ready draft. It acts as a comprehensive digital lab notebook, guiding users from an initial spark of an idea to a fully-formed publication draft, all within a single, cohesive interface. The goal is to democratize the research process, offering a structured yet flexible environment for scientific exploration.
 
 <br>
 
@@ -61,9 +59,39 @@ Project Hypatia empowers researchers by providing an intuitive, AI-driven platfo
     -   **Google Search Grounding**: The Literature Review step provides up-to-date, cited sources.
     -   **JSON Mode & Live Charts**: The Data Analyzer uses a strict JSON schema and Chart.js to create live data visualizations.
     -   **Streaming Responses**: AI text streams in token-by-token for a responsive and engaging UI.
--   📚 **In-App Documentation**: The help manual you're reading right now is accessible from any screen in the app.
+-   📚 **In-App Documentation**: This complete user manual is accessible from any screen in the app via the help icon.
 
-<br>
+---
+
+## The HMAP Philosophy (Human-Mediated Agentic Process)
+
+Project Hypatia is built on the principle of the **Human-Mediated Agentic Process (HMAP)**. This is a framework for human-AI collaboration that emphasizes human agency and control throughout the research lifecycle.
+
+-   **Human as the Director**: You are the principal investigator. The AI is your highly capable, but subordinate, research assistant. It suggests, drafts, and analyzes, but you make the final decisions.
+-   **AI as the Agent**: The AI agent (Gemini) executes complex tasks based on your instructions. This includes literature searches, hypothesis generation, data synthesis, and drafting content.
+-   **Mediation as the Interface**: The Hypatia application is the "mediation" layer. It structures the interaction, provides tools for control (like fine-tuning and editing), and ensures the workflow remains logical and scientifically rigorous.
+
+HMAP is not about letting an AI run the entire research process. It's about augmenting human intellect and creativity by offloading the tedious and time-consuming aspects of research to an AI partner, freeing you up to focus on critical thinking, interpretation, and discovery.
+
+---
+
+## The Scientific Method & Hypatia
+
+The traditional scientific method is a systematic process for inquiry. Project Hypatia's 10-step workflow is designed to mirror and enhance this process.
+
+| Scientific Method Stage | Corresponding Hypatia Step(s)                                   | How Hypatia Enhances It                                                                                               |
+| :---------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| **Observation/Idea**      | `Dashboard` (Create Experiment)                                 | Provides a structured way to capture and describe your initial idea.                                                  |
+| **Research Question**   | **1.** Research Question                                        | AI helps refine a broad idea into a specific, testable question.                                                      |
+| **Background Research** | **2.** Literature Review                                        | Uses Google Search for up-to-date, relevant sources and summarizes them to identify gaps in existing knowledge.      |
+| **Hypothesis**          | **3.** Hypothesis Formulation                                   | AI generates multiple, diverse hypotheses based on the literature, which you can then select or refine.               |
+| **Experiment Design**   | **4.** Methodology Design & **5.** Data Collection Plan         | AI drafts a detailed, step-by-step experimental protocol and a corresponding data collection plan for you to approve. |
+| **Experimentation**     | **6.** Experiment Runner / Data Synthesis                       | A flexible environment to simulate, upload, or synthesize data to test your hypothesis.                               |
+| **Data Analysis**       | **7.** Data Analyzer                                            | AI performs statistical analysis on your data, providing a summary and interactive visualizations.                    |
+| **Conclusion**          | **8.** Conclusion Drawing                                       | AI helps you interpret the results, state whether the hypothesis was supported, and discuss implications.             |
+| **Communication**       | **9.** Peer Review Simulation & **10.** Publication Exporter | AI simulates a critical peer review to strengthen your arguments and then assembles the entire project into a draft paper. |
+
+---
 
 ## Technology Stack
 
@@ -93,19 +121,6 @@ To get a local copy up and running, simply follow these steps.
 ### 1. The 10-Step Workflow
 
 When you open the app, you start on the landing page and can navigate to the **Dashboard**. From there, you can create a new experiment or select an existing one. This will take you to the main workspace, which guides you through the scientific method. The AI's output at each step informs the next, creating a cohesive research narrative.
-
-| Step | Title                   | Description                                                                                                                                                             |
-| :--- | :---------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Research Question       | Refine a broad idea into a focused, testable scientific question.                                                                                                       |
-| 2    | Literature Review       | Uses Google Search grounding to survey recent, relevant academic papers, identifying key findings and research gaps.                                                      |
-| 3    | Hypothesis Formulation  | Generate multiple, distinct, and testable hypotheses based on the literature review.                                                                                    |
-| 4    | Methodology Design      | Design a detailed, step-by-step experimental protocol appropriate for the chosen field of study.                                                                        |
-| 5    | Data Collection Plan    | Outline the specific variables to be measured, the format for data recording, and quality control procedures.                                                             |
-| 6    | **Experiment Runner**   | The core experimental step. Choose to run a custom JavaScript simulation, upload your own dataset, or have the AI synthesize a plausible one.                               |
-| 7    | Data Analyzer           | Ingests data from Step 6 and performs statistical analysis, generating a narrative summary and a live data visualization (using Chart.js) via a structured JSON output.     |
-| 8    | Conclusion Drawing      | Interpret the analysis results to determine if the hypothesis was supported, discussing implications, limitations, and future work.                                       |
-| 9    | Peer Review Simulation  | Submits the entire project to a simulated AI peer reviewer (with adjustable personas like 'Harsh Critic') for constructive feedback.                                        |
-| 10   | Publication Exporter    | Assembles the entire research journey into a formatted, publication-ready draft paper, including Abstract, Introduction, Methods, etc.                                      |
 
 **Full Control**: You have full control over the AI's output.
 -   On any step where text has been generated, you will see an **<i class="bi bi-pencil-square"></i> Edit** button.

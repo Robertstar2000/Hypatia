@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
@@ -16,6 +17,8 @@ marked.setOptions({
     gfm: true,
     breaks: true,
 });
+
+const mtiLogoBase64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIbGNtcwIQAABtbnRyUkdCIFhZWiAH4gADABQACQAOAB1hY3NwTVNGVAAAAABzYXdzY3RybAAAAAAAAAAAAAAAAAAAAAAA9tYAAQAAAADTLWhhbmSdkQA9AAAAQAAAAAQAAAAAEGRlc2MAAVAAAABYAAAAPGNwdHMAADAAAAAgAAAANnd0cHQAAAAwAAAAF3JYWVoAAABAAAAAF2JYWVoAAABQAAAAF2dYWVoAAABgAAAAFHJUUkMAAAB4AAAAIGNoYWQAAACAAAAALGR1bW0AAACsAAAAJGJrIHB0AAACAAAAABRyVFJDAAAAHgAAACBnVFJDAAAAHgAAACBkZXNjAAAAAAAAABRHZW5lcmljIFJHQiBQcm9maWxlAAAAAAAAAAAAAAAUR2VuZXJpYyBSR0IgUHJvZmlsZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWFlaIAAAAAAAAG+iAAA49QAAA5BYWVogAAAAAAAAJJ8AAA+EAAC2w1hZWiAAAAAAAABilwAAt4cAABj5WFlaIAAAAAAAACgaAAAVnwAAuDZjdXJ2AAAAAAAAAAEGAPMAAQC/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAHCAcIDASIAAhEBAxEB/8QAHQAAAQQDAQEAAAAAAAAAAAAABwAFBggCAwQBCf/EAE4QAAEDBAIBAgMDCAYFCAsAAAECAwQABQYRBxIhMQgTQRQiUWEJFTJxgRcjJ0JSkaEksbLRFhgzNkNywSU0N2JzdIKSk7Jjg4TC1mXw/8QAGwEBAAIDAQEAAAAAAAAAAAAAAAMEAQIFBgf/xAAzEQACAQMBBQYEBwEBAAAAAAAAAQIDBBESITFBUQUiYXETMoGRsQUjNEKhwfDhFSRSYtH/2gAMAwEAAhEDEQA/AP0BfB++h+Afvo0qA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKWxpSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUpQClK/8"
 
 // --- DATA STRUCTURES & CONFIG ---
 const SCIENTIFIC_FIELDS = [
@@ -520,9 +523,6 @@ const Header = ({ setView, activeView }) => {
                     </button>
                     <div className="collapse navbar-collapse" id="navbarNav">
                         <ul className="navbar-nav ms-auto">
-                            <li className="nav-item">
-                                <a className={`nav-link ${activeView === 'dashboard' ? 'active' : ''}`} href="#" onClick={() => setView('dashboard')}>Dashboard</a>
-                            </li>
                              {activeView !== 'landing' && (
                                 <li className="nav-item">
                                     <a className="nav-link" href="#" onClick={() => setShowHelp(true)}>
@@ -530,11 +530,6 @@ const Header = ({ setView, activeView }) => {
                                     </a>
                                 </li>
                             )}
-                            <li className="nav-item">
-                                <a className={`nav-link ${activeView === 'testing' ? 'active' : ''}`} href="#" onClick={() => setView('testing')}>
-                                    <i className="bi bi-clipboard-check me-1"></i> Test Runner
-                                </a>
-                            </li>
                         </ul>
                     </div>
                 </div>
@@ -562,6 +557,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
             createNewExperiment(title, description, field);
         }
     };
+    
     return (
         <div>
             <section className="landing-page-hero">
@@ -569,25 +565,18 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                     <h1 className="display-4 landing-title">Project Hypatia</h1>
                     <p className="lead landing-subtitle mb-4">Project Hypatia is your AI-powered partner in scientific research, guiding you from initial question to the mock publication of a draft scientific paper.</p>
 
-                    <div className="row justify-content-center g-3 mb-4">
-                        <div className="col-md-4">
-                            <div className="hero-feature-card">
-                                <i className="bi bi-code-slash"></i>
-                                <span>Run Simulations</span>
-                            </div>
-                        </div>
-                        <div className="col-md-4">
-                             <div className="hero-feature-card">
-                                <i className="bi bi-cloud-upload"></i>
-                                <span>Upload Data</span>
-                            </div>
-                        </div>
-                        <div className="col-md-4">
-                             <div className="hero-feature-card">
-                                <i className="bi bi-magic"></i>
-                                <span>Synthesize Results</span>
-                            </div>
-                        </div>
+                    <div className="d-flex align-items-center justify-content-center gap-4 my-4">
+                        <img src={mtiLogoBase64} alt="Mars Technology Institute Logo" style={{ width: '100px', height: '100px', borderRadius: '50%' }} />
+                        <p className="lead mb-0 text-white-50" style={{maxWidth: '300px', textAlign: 'left'}}>
+                            This application created by{' '}
+                            <span style={{color: '#00f2fe', fontWeight: 'bold'}}>M</span>
+                            <span style={{color: '#ff00ff', fontWeight: 'bold'}}>I</span>
+                            <span style={{color: '#ffff00', fontWeight: 'bold'}}>F</span>
+                            <span style={{color: '#00ff00', fontWeight: 'bold'}}>E</span>
+                            <span style={{color: '#ff8c00', fontWeight: 'bold'}}>C</span>
+                            <span style={{color: '#a64aff', fontWeight: 'bold'}}>O</span>
+                            {' '}a Mars Technology Institute (MTI) affiliate.
+                        </p>
                     </div>
 
                      <div className="getting-started-fields mx-auto">
@@ -597,7 +586,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                                 <input type="text" className="form-control" placeholder="Experiment Title" value={title} onChange={e => setTitle(e.target.value)} required />
                             </div>
                             <div className="mb-3">
-                                 <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows="2"></textarea>
+                                 <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
                             </div>
                             <div className="mb-3">
                                  <select className="form-select" value={field} onChange={e => setField(e.target.value)}>
@@ -652,7 +641,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
 
                     <div className="row align-items-center">
                          <div className="col-lg-6 text-center order-lg-2">
-                            <img src="https://images.unsplash.com/photo-1554475901-4538ddfbccc2?q=80&w=2072&auto=format=fit=crop" alt="Scientist in a dark lab examining glowing blue liquids in test tubes" className="researcher-image" />
+                            <img src="https://images.unsplash.com/photo-1554475901-4538ddfbccc2?q=80&w=2072&auto=format&fit=crop" alt="Scientist in a dark lab examining glowing blue liquids in test tubes" className="researcher-image" />
                         </div>
                         <div className="col-lg-6 order-lg-1">
                              <h2 className="section-title mb-3">From Idea to Publication</h2>
@@ -772,7 +761,7 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
             )}
 
              {isModalOpen && (
-                <div className="modal show" style={{ display: 'block' }} tabIndex="-1">
+                <div className="modal show" style={{ display: 'block' }} tabIndex={-1}>
                     <div className="modal-dialog modal-dialog-centered">
                         <div className="modal-content">
                             <div className="modal-header">
@@ -1096,18 +1085,19 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
                     </select>
                 );
             case 'range':
+// FIX: Ensure value passed to range input is a number and correctly update state with a number.
+                const numericValue = parseFloat(value);
+                const displayValue = isNaN(numericValue) ? param.min : numericValue;
                 return (
                     <div className="d-flex align-items-center">
                         <input
                             type="range"
                             className="form-range"
                             min={param.min} max={param.max} step={param.step}
-                            // FIX: The value from state can be a non-numeric string, resulting in NaN.
-                            // Coerce to a number and default to the minimum if it's not a finite number.
-                            value={Number.isFinite(Number(value)) ? Number(value) : param.min}
+                            value={displayValue}
                             onChange={e => setTempSettings(s => ({ ...s, [param.name]: parseFloat(e.target.value) }))}
                         />
-                        <span className="ms-3 fw-bold">{value}</span>
+                        <span className="ms-3 fw-bold">{displayValue}</span>
                     </div>
                 );
             case 'boolean':
@@ -1129,7 +1119,7 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
     };
 
     return (
-        <div className="modal show" style={{ display: 'block' }} tabIndex="-1">
+        <div className="modal show" style={{ display: 'block' }} tabIndex={-1}>
             <div className="modal-dialog modal-dialog-centered modal-lg">
                 <div className="modal-content">
                     <div className="modal-header">
@@ -1146,7 +1136,7 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
                         )) : <p>No specific tuning parameters for this step.</p>}
                     </div>
                     <div className="modal-footer">
-                        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
                         <button type="button" className="btn btn-primary" onClick={handleSave}>Save Settings</button>
                     </div>
                 </div>
@@ -1228,7 +1218,6 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
         }
 
         try {
-            // FIX: Deep copy the chart config to avoid mutating state and to loosen type constraints.
             const chartConfig = JSON.parse(JSON.stringify(analysis.chartSuggestions[selectedChartIndex]));
             
             if (!chartConfig) {
@@ -1237,13 +1226,16 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
             
             if (chartConfig.data?.datasets) {
                 chartConfig.data.datasets.forEach(dataset => {
+// FIX: Ensure all data points from the API are parsed to numbers for the chart.
                     if (dataset.data) {
-                        dataset.data = dataset.data.map(d => (typeof d === 'string' ? parseFloat(d) : d)).filter(d => d !== null && !isNaN(d));
+                        dataset.data = dataset.data.map(d => parseFloat(d)).filter(d => !isNaN(d));
                     }
-                    // FIX: A truthiness check `if (dataset.borderWidth...` fails for `borderWidth: 0`.
-                    // Using `!= null` ensures `0` is handled correctly but `null` and `undefined` are skipped.
-                    if (dataset.borderWidth != null && typeof dataset.borderWidth === 'string') {
-                        dataset.borderWidth = parseFloat(dataset.borderWidth);
+// FIX: Ensure borderWidth from the API is parsed to a number before being used by Chart.js.
+                    if (dataset.borderWidth != null) {
+                        const newBorderWidth = parseFloat(dataset.borderWidth);
+                        if (!isNaN(newBorderWidth)) {
+                            dataset.borderWidth = newBorderWidth;
+                        }
                     }
                 });
             }
@@ -1610,7 +1602,7 @@ hypatia.finish(csvData, summaryText);
                             {uploadedData && (
                                 <textarea
                                     className="form-control mt-3"
-                                    rows="8"
+                                    rows={8}
                                     value={uploadedData}
                                     readOnly
                                     placeholder="Your uploaded data will appear here..."
@@ -1712,7 +1704,7 @@ ${formData.comments}
     };
 
     return (
-        <div className="modal show" style={{ display: 'block' }} tabIndex="-1">
+        <div className="modal show" style={{ display: 'block' }} tabIndex={-1}>
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content">
                     <form onSubmit={handleSubmit}>
@@ -1727,7 +1719,7 @@ ${formData.comments}
                             </div>
                              <div className="mb-3">
                                 <label className="form-label small text-white-50">Experiment Description</label>
-                                <textarea className="form-control" value={experiment.description} readOnly disabled rows="2"></textarea>
+                                <textarea className="form-control" value={experiment.description} readOnly disabled rows={2}></textarea>
                             </div>
                             <hr />
                             <div className="mb-3">
@@ -1765,7 +1757,7 @@ ${formData.comments}
                             </div>
                              <div className="mb-3">
                                 <label className="form-label">Comments / Feedback</label>
-                                <textarea className="form-control" name="comments" value={formData.comments} onChange={handleChange} required rows="4"></textarea>
+                                <textarea className="form-control" name="comments" value={formData.comments} onChange={handleChange} required rows={4}></textarea>
                             </div>
                         </div>
                         <div className="modal-footer">

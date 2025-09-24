@@ -51,12 +51,13 @@ Project Hypatia is your digital lab partner, an AI-powered platform designed to 
 -   🗺️ **Guided 10-Step Workflow**: A structured path from idea to publication, with each step contextually building upon the previous ones.
 -   ⚙️ **Fine-Tune AI Parameters**: On a per-step basis, adjust AI settings like a peer reviewer's persona, the level of detail in a methodology, or the novelty of a hypothesis.
 -   ✏️ **Editable Outputs**: All AI-generated text can be edited and saved, giving you full control over the research narrative.
--   🔬 **Interactive Experimentation (Step 6)**: A versatile experimental hub with three modes:
-    -   **Custom Code Simulation**: A sandboxed JavaScript environment with a `hypatia.finish()` hook.
-    -   **Direct Data Upload**: For offline experiments, with AI-powered template generation.
-    -   **AI-Powered Data Synthesis**: For conceptual testing without needing to code or collect data.
+-   🔬 **Multi-Modal Experimentation (Step 6)**: A versatile experimental hub with three distinct, AI-powered modes:
+    -   **AI-Generated Code Simulation**: The AI writes a starting JavaScript simulation based on your plan, which you can run, edit, and debug.
+    -   **Dynamic Manual Data Entry**: The AI generates a custom data-entry table based on your data collection plan for easy manual input.
+    -   **AI-Powered Data Synthesis**: For conceptual testing, the AI can estimate and generate a complete, plausible dataset.
 -   🧠 **Advanced AI Integration**:
-    -   **Google Search Grounding**: The Literature Review step provides up-to-date, cited sources.
+    -   **Google Search Grounding**: The Literature Review step uses Google Search to provide up-to-date, cited sources with URLs.
+    -   **AI-Powered Debugging**: The code simulator includes an "Auto-Fix with AI" button to help resolve runtime errors.
     -   **JSON Mode & Live Charts**: The Data Analyzer uses a strict JSON schema and Chart.js to create live data visualizations.
     -   **Streaming Responses**: AI text streams in token-by-token for a responsive and engaging UI.
 -   📚 **In-App Documentation**: This complete user manual is accessible from any screen in the app via the help icon.
@@ -83,10 +84,10 @@ The traditional scientific method is a systematic process for inquiry. Project H
 | :---------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
 | **Observation/Idea**      | `Dashboard` (Create Experiment)                                 | Provides a structured way to capture and describe your initial idea.                                                  |
 | **Research Question**   | **1.** Research Question                                        | AI helps refine a broad idea into a specific, testable question.                                                      |
-| **Background Research** | **2.** Literature Review                                        | Uses Google Search for up-to-date, relevant sources and summarizes them to identify gaps in existing knowledge.      |
+| **Background Research** | **2.** Literature Review                                        | Uses **Google Search grounding** for up-to-date, relevant sources and summarizes them with citations to identify gaps in existing knowledge.      |
 | **Hypothesis**          | **3.** Hypothesis Formulation                                   | AI generates multiple, diverse hypotheses based on the literature, which you can then select or refine.               |
 | **Experiment Design**   | **4.** Methodology Design & **5.** Data Collection Plan         | AI drafts a detailed, step-by-step experimental protocol and a corresponding data collection plan for you to approve. |
-| **Experimentation**     | **6.** Experiment Runner / Data Synthesis                       | A flexible environment to simulate, upload, or synthesize data to test your hypothesis.                               |
+| **Experimentation**     | **6.** Experiment Runner / Data Synthesis                       | A flexible environment to generate data via AI-written code simulation, dynamic manual entry, or direct AI synthesis. |
 | **Data Analysis**       | **7.** Data Analyzer                                            | AI performs statistical analysis on your data, providing a summary and interactive visualizations.                    |
 | **Conclusion**          | **8.** Conclusion Drawing                                       | AI helps you interpret the results, state whether the hypothesis was supported, and discuss implications.             |
 | **Communication**       | **9.** Peer Review Simulation & **10.** Publication Exporter | AI simulates a critical peer review to strengthen your arguments and then assembles the entire project into a draft paper. |
@@ -133,36 +134,34 @@ In each step of the workspace, you can click the **<i class="bi bi-sliders"></i>
 
 ### 3. The Experiment Runner (Step 6)
 
-This step offers three powerful paths forward, accessible via tabs:
+This step is a powerful, multi-modal hub for generating your experimental data. You will be prompted to choose one of three methods:
 
-**A) Run Custom Code:**
-1.  **Write Code**: In the "Run Custom Code" tab, you'll find a text editor where you can write your simulation in JavaScript.
-2.  **Debug**: Use `console.log()` to print messages to the output panel below the editor.
-3.  **Finish the Experiment**: When your code has generated the results, call the special `hypatia.finish()` function to pass the data to the next step.
+**A) AI-Generated Simulation:**
+1.  **AI Writes the Code**: The AI will read your methodology from Step 4 and automatically write a JavaScript simulation as a starting point.
+2.  **Run & Debug**: You can edit the code, use `console.log()` to print debug messages, and run the simulation directly in the browser.
+3.  **Finish the Experiment**: The simulation must call the special `hypatia.finish(csvData, summary)` function to pass its results (in CSV string format) to the next step for analysis.
+4.  **Auto-Fix with AI**: If your code has a runtime error, an **Auto-Fix with AI** button will appear, allowing the AI to attempt to correct the bug for you.
 
 ```javascript
-// This special function connects your code to the app's workflow.
-// It takes two string arguments: data and a summary.
-
-hypatia.finish(data, summary);
-
-// EXAMPLE:
+// Example of the required finish function:
 const csvData = "time,temperature\n0,20\n1,22\n2,25";
 const summaryText = "Simulated temperature increase over 2 seconds.";
 
+// This call passes the data to Step 7.
 hypatia.finish(csvData, summaryText);
 ```
 
-**B) Upload Own Data:**
--   If you've conducted your experiment offline, use this tab to upload the results.
--   You can first click **Download Template** to have the AI generate a CSV header based on your Data Collection Plan from Step 5, ensuring correct formatting.
--   Then, choose your file and click **Use This Data for Analysis** to send it to Step 7.
+**B) Dynamic Manual Data Entry:**
+-   If you've conducted your experiment offline, select this mode.
+-   The AI will read your Data Collection Plan from Step 5 and generate a structured data entry table with the correct columns.
+-   You can add or remove rows and enter your data directly into the form.
+-   Once finished, click "Submit Data" to convert your entries into a CSV format and send it to Step 7 for analysis.
 
-**C) Skip & Synthesize Results:**
--   If you don't want to write code or upload data, simply click the **Skip & Synthesize Results** button (available in the "Run Custom Code" tab).
+**C) AI Data Synthesis:**
+-   This mode is ideal for theoretical exploration or when you want to proceed without running a full simulation.
 -   The AI will read your methodology and data plans from the previous steps.
 -   It will then generate a plausible, synthetic dataset that logically follows from your research design.
--   This synthetic data is then automatically passed to Step 7 for analysis.
+-   You can review the generated data and summary, then click "Use This Data" to pass it to Step 7.
 
 ---
 

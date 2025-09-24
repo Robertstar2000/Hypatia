@@ -2,11 +2,26 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { marked } from 'marked';
 import { appTests } from './index.test.tsx';
 import { Chart, registerables } from 'chart.js';
-import Dexie, { type Table } from 'dexie';
+import { mtiLogoBase64 } from './assets';
+import {
+    Experiment,
+    SCIENTIFIC_FIELDS,
+    WORKFLOW_STEPS,
+    STEP_SPECIFIC_TUNING_PARAMETERS
+} from './config';
+import {
+    db,
+    initializeGemini,
+    getStepContext,
+    getPromptForStep,
+    getPromptForInputSuggestion
+} from './services';
+import { ToastProvider, useToast } from './toast';
+import { ExperimentRunner } from './experimentRunner';
+
 
 Chart.register(...registerables);
 
@@ -17,365 +32,6 @@ marked.setOptions({
     gfm: true,
     breaks: true,
 });
-
-const mtiLogoBase64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIbGNtcwIQAABtbnRyUkdCIFhZWiAH4gADABQACQAOAB1hY3NwTVNGVAAAAABzYXdzY3RybAAAAAAAAAAAAAAAAAAAAAAA9tYAAQAAAADTLWhhbmSdkQA9AAAAQAAAAAQAAAAAEGRlc2MAAVAAAABYAAAAPGNwdHMAADAAAAAgAAAANnd0cHQAAAAwAAAAF3JYWVoAAABAAAAAF2JYWVoAAABQAAAAF2dYWVoAAABgAAAAFHJUUkMAAAB4AAAAIGNoYWQAAACAAAAALGR1bW0AAACsAAAAJGJrIHB0AAACAAAAABRyVFJDAAAAHgAAACBnVFJDAAAAHgAAACBkZXNjAAAAAAAAABRHZW5lcmljIFJHQiBQcm9maWxlAAAAAAAAAAAAAAAUR2VuZXJpYyBSR0IgUHJvZmlsZQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWFlaIAAAAAAAAG+iAAA49QAAA5BYWVogAAAAAAAAJJ8AAA+EAAC2w1hZWiAAAAAAAABilwAAt4cAABj5WFlaIAAAAAAAACgaAAAVnwAAuDZjdXJ2AAAAAAAAAAEGAPMAAQC/2wBDAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYGCAsICQoKCgoKBggLDAsKDAkKCgr/2wBDAQICAgICAgUDAwUKBwYHCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgr/wAARCAHCAcIDASIAAhEBAxEB/8QAHQAAAQQDAQEAAAAAAAAAAAAABwAFBggCAwQBCf/EAE4QAAEDBAIBAgMDCAYFCAsAAAECAwQABQYRBxIhMQgTQRQiUWEJFTJxgRcjJ0JSkaEksbLRFhgzNkNywSU0N2JzdIKSk7Jjg4TC1mXw/8QAGwEBAAIDAQEAAAAAAAAAAAAAAAMEAQIFBgf/xAAzEQACAQMBBQYEBwEBAAAAAAAAAQIDBBESITFBUQUiYXETMoGRsQUjNEKhwfDhFSRSYtH/2gAMAwEAAhEDEQA/AP0BfB++h+Afvo0qA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKA7+AfvofgH76NKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKUoBSlKAUpSgFKWxpSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUApSlAKUpQClKUpQClK/8"
-
-// --- DATA STRUCTURES & CONFIG ---
-const SCIENTIFIC_FIELDS = [
-    'General Science',
-    'Computer Science',
-    'Neuroscience',
-    'Molecular Biology',
-    'Particle Physics',
-    'Organic Chemistry',
-    'Environmental Science',
-    'Materials Science',
-    'Astronomy & Astrophysics',
-    'Psychology',
-    'Economics',
-    'Mechanical Engineering',
-    'Electrical Engineering',
-    'Civil Engineering',
-    'Medicine',
-    'Genetics',
-    'Ecology',
-    'Geology',
-    'Mathematics',
-    'Artificial Intelligence'
-].sort();
-
-
-// --- DATA INTERFACES ---
-/** @interface StepData Represents the data stored for a single workflow step. */
-interface StepData {
-    input?: string;
-    output?: string;
-    history?: { timestamp: string; output: string }[];
-}
-
-/** @interface FineTuneSettings Represents the AI settings for a specific step */
-interface FineTuneSettings {
-    [key: string]: any;
-}
-
-/** @interface Experiment Represents a single research project. */
-interface Experiment {
-    id: string;
-    title: string;
-    description: string;
-    currentStep: number;
-    stepData: { [key: string]: StepData };
-    fineTuneSettings: { [key: string]: FineTuneSettings };
-    createdAt: string;
-    field: (typeof SCIENTIFIC_FIELDS)[number];
-    simulationCode?: string;
-}
-
-/** @interface ToastContextType Defines the shape of the toast notification context. */
-interface ToastContextType {
-    addToast: (message: string, type?: 'success' | 'danger' | 'warning' | 'info') => void;
-}
-
-// --- DATABASE SETUP with Dexie.js ---
-class HypatiaDB extends Dexie {
-    experiments!: Table<Experiment>;
-
-    constructor() {
-        super('hypatiaDB');
-        this.version(1).stores({
-            experiments: 'id, createdAt' // Primary key 'id', index 'createdAt' for sorting
-        });
-    }
-}
-
-const db = new HypatiaDB();
-
-
-// --- TOAST NOTIFICATION CONTEXT ---
-const ToastContext = React.createContext<ToastContextType | null>(null);
-const ToastProvider = ({ children }) => {
-    const [toasts, setToasts] = useState([]);
-    const addToast = useCallback((message, type = 'success') => {
-        const id = Date.now();
-        setToasts(prev => [...prev, { id, message, type }]);
-        setTimeout(() => {
-            setToasts(prev => prev.filter(t => t.id !== id));
-        }, 5000);
-    }, []);
-
-    return (
-        <ToastContext.Provider value={{ addToast }}>
-            {children}
-            <div className="toast-container position-fixed bottom-0 end-0 p-3" style={{zIndex: 1100}}>
-                {toasts.map(toast => (
-                    <div key={toast.id} className={`toast show bg-${toast.type} text-white`} role="alert">
-                        <div className="toast-body">{toast.message}</div>
-                    </div>
-                ))}
-            </div>
-        </ToastContext.Provider>
-    );
-};
-const useToast = () => React.useContext(ToastContext);
-
-// --- GEMINI API INITIALIZATION ---
-const initializeGemini = () => {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-        console.error("API Key is missing. Please set up the environment variable.");
-        return null;
-    }
-    try {
-        return new GoogleGenAI({ apiKey });
-    } catch (e) {
-        console.error("Failed to initialize Gemini API:", e);
-        return null;
-    }
-};
-
-// --- APP CONSTANTS & WORKFLOW ---
-const WORKFLOW_STEPS = [
-    { id: 1, title: 'Research Question', icon: 'bi-question-circle', description: 'Start by defining a clear, focused research question.' },
-    { id: 2, title: 'Literature Review', icon: 'bi-book', description: 'Survey existing research to understand the current landscape. (Uses Google Search)' },
-    { id: 3, title: 'Hypothesis Formulation', icon: 'bi-lightbulb', description: 'Formulate a testable hypothesis based on your question and review.' },
-    { id: 4, title: 'Methodology Design', icon: 'bi-diagram-3', description: 'Design the experimental methods you will use to test your hypothesis.' },
-    { id: 5, title: 'Data Collection Plan', icon: 'bi-clipboard-data', description: 'Outline how you will collect the necessary data.' },
-    { id: 6, title: 'Experiment Runner / Data Synthesis', icon: 'bi-beaker', description: 'Run a virtual experiment, upload data, or synthesize a plausible dataset.' },
-    { id: 7, title: 'Data Analyzer', icon: 'bi-graph-up-arrow', description: 'Analyze the collected data to identify patterns and insights.' },
-    { id: 8, title: 'Conclusion Drawing', icon: 'bi-trophy', description: 'Draw conclusions based on your analysis and the initial hypothesis.' },
-    { id: 9, title: 'Peer Review Simulation', icon: 'bi-people', description: 'Get simulated feedback on your research from an AI peer.' },
-    { id: 10, title: 'Publication Exporter', icon: 'bi-journal-richtext', description: 'Generate a draft of your research paper for publication.' }
-];
-
-const DEFAULT_STEP_INPUTS = {
-    1: 'The effect of intermittent fasting on metabolic health markers.',
-    2: '', // Step 2 is based on the output of Step 1, so no default input needed.
-    3: 'Hypothesis 1: Intermittent fasting will lead to a significant reduction in fasting insulin levels.',
-    4: 'A randomized controlled trial with two groups: one following an intermittent fasting protocol and a control group with a regular diet.',
-    5: 'Collect blood samples at baseline and after 12 weeks to measure fasting glucose, insulin, and lipid profiles. Data will be recorded in a CSV file.',
-    6: '', // Step 6 is for simulation or synthesis, no text input needed to start.
-    7: 'time,group,fasting_insulin\n0,control,15.1\n0,fasting,14.8\n84,control,14.5\n84,fasting,10.2',
-    8: '', // Based on Step 7 output.
-    9: '', // Based on previous steps.
-    10: '', // This step generates, doesn't take input.
-};
-
-
-const STEP_SPECIFIC_TUNING_PARAMETERS = {
-    1: [
-        { name: 'scope', label: 'Scope', type: 'select', options: ['Broad', 'Specific', 'Niche'], default: 'Specific', description: 'Define the breadth of the research question.' },
-        { name: 'questionType', label: 'Question Type', type: 'select', options: ['Descriptive', 'Comparative', 'Relational'], default: 'Comparative', description: 'The nature of the question (e.g., what is vs. is x better than y).' },
-        { name: 'clarity', label: 'Clarity', type: 'range', min: 0.5, max: 1.0, step: 0.1, default: 0.8, description: 'How precise and unambiguous the question should be.' },
-        { name: 'testability', label: 'Testability', type: 'boolean', default: true, description: 'Ensure the question can be practically tested.' },
-    ],
-    2: [
-        { name: 'sourceRecency', label: 'Source Recency', type: 'select', options: ['Last Year', 'Last 5 Years', 'Any Time'], default: 'Last 5 Years', description: 'Filter sources by publication date.' },
-        { name: 'summaryLength', label: 'Summary Length', type: 'select', options: ['Brief', 'Standard', 'Detailed'], default: 'Standard', description: 'The level of detail for the literature summary.' },
-        { name: 'focus', label: 'Focus Area', type: 'select', options: ['Key Findings', 'Methodologies', 'Gaps in Research'], default: 'Gaps in Research', description: 'The main emphasis of the review.' },
-        { name: 'sourceCount', label: 'Number of Sources', type: 'range', min: 3, max: 8, step: 1, default: 5, description: 'How many key sources to identify and cite.' },
-    ],
-    3: [
-        { name: 'hypothesisCount', label: 'Number of Hypotheses', type: 'range', min: 1, max: 5, step: 1, default: 3, description: 'How many distinct hypotheses to generate.' },
-        { name: 'style', label: 'Hypothesis Style', type: 'select', options: ['If/Then Statement', 'Null/Alternative Pair', 'Directional Prediction'], default: 'Directional Prediction', description: 'The format for presenting the hypotheses.' },
-        { name: 'novelty', label: 'Novelty', type: 'range', min: 0.2, max: 1.0, step: 0.1, default: 0.6, description: 'How conventional or groundbreaking the hypotheses should be.' },
-        { name: 'includeReasoning', label: 'Include Reasoning', type: 'boolean', default: true, description: 'Whether to include a brief justification for each hypothesis.' },
-    ],
-    4: [
-        { name: 'detailLevel', label: 'Level of Detail', type: 'select', options: ['High-level Overview', 'Standard Protocol', 'Granular Step-by-Step'], default: 'Standard Protocol', description: 'The granularity of the methodology description.' },
-        { name: 'rigor', label: 'Methodological Rigor', type: 'range', min: 0.5, max: 1.0, step: 0.1, default: 0.8, description: 'The level of scientific control and precision in the design.' },
-        { name: 'focusOn', label: 'Primary Focus', type: 'select', options: ['Internal Validity', 'External Validity', 'Feasibility'], default: 'Internal Validity', description: 'Prioritize one aspect of the study design.' },
-        { name: 'includeContingencies', label: 'Include Contingencies', type: 'boolean', default: false, description: 'Plan for potential issues or alternative procedures.' },
-    ],
-    5: [
-        { name: 'dataFormat', label: 'Data Format', type: 'select', options: ['CSV', 'JSON', 'Tabular Text'], default: 'CSV', description: 'The format for the data to be collected.' },
-        { name: 'instrumentationDetail', label: 'Instrumentation Detail', type: 'select', options: ['Conceptual', 'Specific Instruments', 'Vendor/Model Agnostic'], default: 'Specific Instruments', description: 'How detailed to be about the tools used.' },
-        { name: 'qualityControl', label: 'Quality Control', type: 'boolean', default: true, description: 'Include a section on measures to ensure data quality.' },
-        { name: 'ethicsConsiderations', label: 'Ethics Considerations', type: 'boolean', default: true, description: 'Include a section on ethical considerations, if applicable.' },
-    ],
-    6: [
-        { name: 'datasetSize', label: 'Dataset Size', type: 'select', options: ['Small (10-50 rows)', 'Medium (50-200 rows)', 'Large (200+ rows)'], default: 'Medium (50-200 rows)', description: 'The approximate number of records to generate.' },
-        { name: 'dataComplexity', label: 'Data Complexity', type: 'select', options: ['Simple', 'With Noise/Outliers', 'Multi-variate'], default: 'With Noise/Outliers', description: 'The complexity and realism of the data.' },
-        { name: 'trend', label: 'Data Trend', type: 'select', options: ['Clear Support for Hypothesis', 'Ambiguous/Null Result', 'Contradicts Hypothesis'], default: 'Clear Support for Hypothesis', description: 'The underlying pattern in the synthesized data.' },
-        { name: 'format', label: 'Output Format', type: 'select', options: ['CSV', 'JSON'], default: 'CSV', description: 'The final format for the synthesized data.' },
-    ],
-    7: [
-        { name: 'analysisType', label: 'Analysis Type', type: 'select', options: ['Descriptive Statistics', 'Inferential Statistics', 'Trend Analysis'], default: 'Inferential Statistics', description: 'The primary type of statistical analysis to perform.' },
-        { name: 'chartSuggestion', label: 'Suggested Chart', type: 'select', options: ['Bar', 'Line', 'Scatter', 'Pie', 'Let AI Decide'], default: 'Let AI Decide', description: 'Suggest a chart type, or let the AI choose the most appropriate one.' },
-        { name: 'interpretationDepth', label: 'Interpretation Depth', type: 'select', options: ['Surface Level', 'In-depth Statistical', 'Implication-focused'], default: 'In-depth Statistical', description: 'How deeply to interpret the findings.' },
-        { name: 'statisticalSignificance', label: 'Mention Significance', type: 'boolean', default: true, description: 'Mention p-values, confidence intervals, etc.' },
-    ],
-    8: [
-        { name: 'confidence', label: 'Confidence Level', type: 'select', options: ['Cautious', 'Assertive', 'Balanced'], default: 'Balanced', description: 'The tone of confidence in the conclusions.' },
-        { name: 'focusOn', label: 'Primary Focus', type: 'select', options: ['Implications', 'Limitations', 'Future Work'], default: 'Implications', description: 'Emphasize one part of the conclusion section.' },
-        { name: 'audience', label: 'Target Audience', type: 'select', options: ['Expert', 'General Academic', 'Layperson'], default: 'General Academic', description: 'Tailor the language to a specific audience.' },
-        { name: 'structure', label: 'Conclusion Structure', type: 'select', options: ['Standard', 'Executive Summary First'], default: 'Standard', description: 'The format of the conclusion.' },
-    ],
-    9: [
-        { name: 'reviewerPersona', label: 'Reviewer Persona', type: 'select', options: ['Supportive Colleague', 'Harsh Critic', 'Methodology Expert', 'Big Picture Thinker'], default: 'Harsh Critic', description: 'The personality of the simulated peer reviewer.' },
-        { name: 'reviewFocus', label: 'Review Focus', type: 'select', options: ['Logical Cohesion', 'Statistical Rigor', 'Novelty & Impact', 'Clarity of Writing'], default: 'Statistical Rigor', description: 'The main area the reviewer should critique.' },
-        { name: 'constructiveness', label: 'Constructiveness', type: 'range', min: 0.2, max: 1.0, step: 0.1, default: 0.8, description: 'How constructive vs. purely critical the feedback is.' },
-        { name: 'includeActionableSuggestions', label: 'Include Suggestions', type: 'boolean', default: true, description: 'Provide concrete suggestions for improvement.' },
-    ],
-    10: [
-        { name: 'targetJournalStyle', label: 'Target Journal Style', type: 'select', options: ['Nature (Concise)', 'PLOS ONE (Comprehensive)', 'Generic Academic'], default: 'Generic Academic', description: 'Emulate the style of a specific type of journal.' },
-        { name: 'abstractLength', label: 'Abstract Length (words)', type: 'range', min: 150, max: 300, step: 10, default: 250, description: 'The target word count for the abstract.' },
-        { name: 'emphasis', label: 'Paper Emphasis', type: 'select', options: ['Results & Data', 'Narrative & Impact', 'Methodological Detail'], default: 'Narrative & Impact', description: 'Which aspect of the research to highlight most prominently.' },
-        { name: 'includeReferences', label: 'Include Placeholder References', type: 'boolean', default: true, description: 'Generate a list of placeholder references.' },
-    ]
-};
-
-const DATA_ANALYZER_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        summary: {
-            type: Type.STRING,
-            description: "A one-paragraph summary of the analysis findings, formatted as Markdown. This will be displayed above the chart.",
-        },
-        chartSuggestions: {
-            type: Type.ARRAY,
-            description: "An array of up to three different and relevant chart suggestions. The first suggestion should be the most appropriate visualization.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    type: { type: Type.STRING, description: "The type of chart, e.g., 'bar', 'line', 'scatter'." },
-                    data: {
-                        type: Type.OBJECT,
-                        properties: {
-                            labels: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            datasets: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        label: { type: Type.STRING },
-                                        data: { type: Type.ARRAY, items: { type: Type.NUMBER } },
-                                        backgroundColor: { type: Type.ARRAY, items: { type: Type.STRING } },
-                                        borderColor: { type: Type.ARRAY, items: { type: Type.STRING } },
-                                        borderWidth: { type: Type.NUMBER },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    options: { type: Type.OBJECT },
-                },
-            },
-        },
-    },
-};
-
-
-// --- HELPER FUNCTIONS ---
-const getStepContext = (experiment: Experiment, stepId: number) => {
-    const context: any = { experimentField: experiment.field };
-    const data = experiment.stepData || {};
-    if (stepId > 1) context.question = data['1']?.output || '';
-    if (stepId > 2) context.literature_review = data['2']?.output || '';
-    if (stepId > 3) context.hypothesis = data['3']?.output || '';
-    if (stepId > 4) context.methodology = data['4']?.output || '';
-    if (stepId > 7) context.analysis_summary = data['7']?.output || '';
-    if (stepId > 8) context.conclusion = data['8']?.output || '';
-    if (stepId === 9) { // Peer review needs everything
-        context.results = data['7']?.output || '';
-    }
-    return context;
-};
-
-const getPromptForStep = (stepId, userInput, context, fineTuneSettings: FineTuneSettings) => {
-    let systemInstruction = `You are an AI research assistant specializing in ${context.experimentField || 'General Science'}. Your tone should be expert, academic, and tailored to that field. Use appropriate terminology, common methodologies, and theoretical frameworks relevant to ${context.experimentField || 'General Science'}.`;
-
-    // Add dynamic tuning instructions
-    const settings = fineTuneSettings || {};
-    const params = STEP_SPECIFIC_TUNING_PARAMETERS[stepId] || [];
-    const instructions = [];
-
-    params.forEach(param => {
-        const value = settings[param.name] ?? param.default;
-        if (value === undefined) return;
-
-        // Special handling for persona which modifies the core system instruction
-        if (param.name === 'reviewerPersona') {
-            systemInstruction += ` You are now acting as a critical peer reviewer with the persona of a '${value}'.`;
-        } else {
-             instructions.push(`For the parameter '${param.label}', the value must be '${value}'.`);
-        }
-    });
-
-    if (instructions.length > 0) {
-        systemInstruction += ` Strictly adhere to the following tuning parameters: ${instructions.join(' ')}.`;
-    }
-
-    let basePrompt = "";
-    let useSearch = false;
-    let expectJson = false;
-
-    switch (stepId) {
-        case 1:
-            basePrompt = `The user's initial idea for a research topic is: "${userInput}". Refine this into a clear, concise, and testable scientific question relevant to the field of ${context.experimentField || 'General Science'}. Output only the question.`;
-            break;
-        case 2:
-            useSearch = true;
-            basePrompt = `The research question is: "${context.question}". Conduct a comprehensive literature review using Google Search to find recent and highly relevant academic papers, articles, and conference proceedings.
-Your output must be structured in Markdown and include the following sections:
-1. **Literature Review Summary:** A detailed synthesis of the current state of research on this topic. Discuss the primary findings, prevailing theories, and common methodologies.
-2. **Identified Gaps:** A bulleted list of specific gaps or unanswered questions in the existing literature that your research could address.
-3. **Key References:** A numbered list of 7-12 of the most relevant sources you found. For each source, provide its title and URI. Format it clearly.`;
-            break;
-        case 3:
-            basePrompt = `Based on the research question: "${context.question}" and the provided literature review summary: "${context.literature_review}", generate distinct, testable hypotheses. Present them as a numbered list.`;
-            break;
-        case 4:
-            basePrompt = `The research question is: "${context.question}". The chosen hypothesis is: "${userInput || context.hypothesis}". Design a detailed, step-by-step research methodology to test this hypothesis. The methodology should be appropriate for the field of ${context.experimentField || 'General Science'}. Include sections for: Participants/Subjects (if applicable), Materials/Apparatus, Procedure, and Data Analysis techniques to be used.`;
-            break;
-        case 5:
-            basePrompt = `Based on the designed methodology: "${context.methodology}", create a detailed data collection plan. Specify the exact data points to be collected, the format they should be in, and the instruments or protocols for collection. Also, describe any measures to ensure data quality and integrity.`;
-            break;
-        case 6:
-            basePrompt = `The research hypothesis is: "${context.hypothesis}" and the methodology is: "${context.methodology}". Generate a plausible, synthetic dataset that could have resulted from this experiment. The dataset should be in a simple, machine-readable format. Ensure the data is realistic for the described experiment and will be suitable for the analysis planned in the next step. Provide the dataset directly, without extra explanations unless necessary for context.`;
-            break;
-        case 7:
-            expectJson = true;
-            basePrompt = `Analyze the following data: "${userInput}". The research hypothesis is: "${context.hypothesis}". The methodology was: "${context.methodology}".
-Your task is to perform a statistical analysis and suggest appropriate visualizations.
-Your entire response must be a single, valid JSON object that strictly adheres to the provided schema. Do not include markdown backticks, any introductory text, or any explanations.`;
-            break;
-        case 8:
-            basePrompt = `The research question was: "${context.question}". The hypothesis was: "${context.hypothesis}". The data analysis results are summarized as: "${context.analysis_summary}". Based on this analysis, draw a clear and concise conclusion. State whether the hypothesis was supported, refuted, or if the results were inconclusive. Discuss the implications of these findings, potential limitations of the study, and suggest directions for future research.`;
-            break;
-        case 9:
-            basePrompt = `Conduct a peer review of the following research project. Be critical and constructive.
-- Research Question: "${context.question}"
-- Hypothesis: "${context.hypothesis}"
-- Methodology: "${context.methodology}"
-- Results Summary: "${context.analysis_summary}"
-- Conclusion: "${context.conclusion}"
-Critique the study's design, methodology, and the validity of its conclusions. Point out any logical fallacies, potential biases, or areas where the research could be strengthened. Format your review into sections: Strengths, Weaknesses, and Suggestions for Improvement.`;
-            break;
-        case 10:
-            basePrompt = `Generate a draft for a scientific publication based on the entire research project. The paper should be structured with the following sections: Abstract, Introduction (containing the research question), Literature Review, Methodology, Results, Discussion (including conclusions and limitations), and Future Work. Use the context provided below to fill in each section.
-
-- Research Question: "${context.question}"
-- Literature Review Summary: "${context.literature_review}"
-- Hypothesis: "${context.hypothesis}"
-- Methodology: "${context.methodology}"
-- Results & Analysis Summary (from Step 7): "${context.analysis_summary}"
-- Conclusion: "${context.conclusion}"
-
-**IMPORTANT INSTRUCTIONS FOR THE 'RESULTS' SECTION:**
-The "Results & Analysis Summary" field contains a JSON object. You MUST parse this JSON.
-1. Use the 'summary' field from the JSON to write the main narrative of the results.
-2. The JSON also contains a 'chartSuggestions' array. For each chart object in this array, you MUST generate a proper figure reference in Markdown.
-3. Assign a sequential figure number (e.g., Figure 1, Figure 2).
-4. Use the chart's 'type' and the dataset 'label' to create a descriptive caption.
-5. Format it like this: **Figure [Number]: [A descriptive title for the chart, e.g., 'Bar chart showing \${dataset.label}'].**
-6. You MUST refer to each figure number in the text of the Results section (e.g., "As shown in Figure 1, the data indicates...").
-7. Do not try to render the chart itself, just create the Markdown text placeholder and caption for it.`;
-            break;
-        default:
-            basePrompt = `An unknown step was requested. Please check the application logic.`;
-    }
-    return { basePrompt, systemInstruction, useSearch, expectJson };
-};
 
 // --- REACT COMPONENTS ---
 
@@ -549,7 +205,7 @@ const Footer = () => (
 const LandingPage = ({ setView, createNewExperiment }) => {
      const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
-    const [field, setField] = useState(SCIENTIFIC_FIELDS[0]);
+    const [field, setField] = useState<(typeof SCIENTIFIC_FIELDS)[number]>(SCIENTIFIC_FIELDS[0]);
 
     const handleStart = (e) => {
         e.preventDefault();
@@ -589,7 +245,7 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                                  <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
                             </div>
                             <div className="mb-3">
-                                 <select className="form-select" value={field} onChange={e => setField(e.target.value)}>
+                                 <select className="form-select" value={field} onChange={e => setField(e.target.value as (typeof SCIENTIFIC_FIELDS)[number])}>
                                     {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
                                 </select>
                             </div>
@@ -709,7 +365,7 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
-    const [field, setField] = useState(SCIENTIFIC_FIELDS[0]);
+    const [field, setField] = useState<(typeof SCIENTIFIC_FIELDS)[number]>(SCIENTIFIC_FIELDS[0]);
 
     const handleCreate = (e) => {
         e.preventDefault();
@@ -780,7 +436,7 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
                                         </div>
                                         <div className="mb-3">
                                              <label className="form-label">Field of Science</label>
-                                             <select className="form-select" value={field} onChange={e => setField(e.target.value)}>
+                                             <select className="form-select" value={field} onChange={e => setField(e.target.value as (typeof SCIENTIFIC_FIELDS)[number])}>
                                                 {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
                                             </select>
                                         </div>
@@ -799,33 +455,86 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
     );
 };
 
+interface ExperimentWorkspaceProps {
+    experiment: Experiment;
+    onUpdate: (updatedExperiment: Experiment) => Promise<void>;
+}
 
-const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
+// Fix: Explicitly typing as React.FC resolves a TypeScript error where the 'key' prop was being incorrectly checked against the component's props.
+const ExperimentWorkspace: React.FC<ExperimentWorkspaceProps> = ({ experiment: initialExperiment, onUpdate }) => {
     const [experiment, setExperiment] = useState(initialExperiment);
     const [activeStep, setActiveStep] = useState(initialExperiment.currentStep);
     const [userInput, setUserInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
     const [streamingOutput, setStreamingOutput] = useState("");
     const [isFineTuneModalOpen, setFineTuneModalOpen] = useState(false);
 
     const gemini = useMemo(() => initializeGemini(), []);
     const { addToast } = useToast();
 
-    // Reset input when step changes
+    // Effect for handling step changes and generating initial input suggestions
     useEffect(() => {
-        const existingInput = experiment.stepData[activeStep]?.input;
-        if (existingInput !== undefined) {
-             setUserInput(existingInput);
-        } else {
-             setUserInput(DEFAULT_STEP_INPUTS[activeStep] || '');
-        }
-        setStreamingOutput("");
-    }, [activeStep, experiment.stepData]);
+        const currentStepData = experiment.stepData[activeStep];
+        setStreamingOutput(""); // Clear streaming output when step changes
 
-    const handleUpdate = (updatedData) => {
+        // If the user navigates to the current, uncompleted step, and there's no output yet,
+        // generate a suggestion for the input.
+        if (activeStep === experiment.currentStep && !currentStepData?.output && !currentStepData?.suggestedInput) {
+             const generateSuggestedInput = async () => {
+                if (!gemini) return;
+                setIsLoadingSuggestion(true);
+                try {
+                    const context = getStepContext(experiment, activeStep);
+                    const { basePrompt, config } = getPromptForInputSuggestion(activeStep, context);
+
+                    if (!basePrompt) { // Some steps might not need a suggestion
+                        setUserInput(currentStepData?.input || '');
+                        return;
+                    }
+
+                    const response = await gemini.models.generateContent({
+                        model: 'gemini-2.5-flash',
+                        contents: basePrompt,
+                        config: config
+                    });
+                    const suggestion = response.text;
+                    setUserInput(suggestion);
+
+                    // Save the suggestion to the experiment state
+                    const updatedStepData = {
+                        ...experiment.stepData,
+                        [activeStep]: {
+                            ...experiment.stepData[activeStep],
+                            suggestedInput: suggestion,
+                            input: suggestion // Pre-fill input with suggestion
+                        }
+                    };
+                    handleUpdate({ stepData: updatedStepData }, true); // silent update
+                } catch (error) {
+                    console.error("Failed to generate suggested input:", error);
+                    addToast("Could not generate an AI suggestion for the input.", 'warning');
+                    setUserInput(currentStepData?.input || ''); // Fallback to existing input or empty
+                } finally {
+                    setIsLoadingSuggestion(false);
+                }
+            };
+            generateSuggestedInput();
+        } else {
+            // Otherwise, just load the existing input for the step.
+            setUserInput(currentStepData?.input || '');
+        }
+
+    }, [activeStep, experiment.currentStep, gemini]);
+
+
+    const handleUpdate = (updatedData, silent = false) => {
         const updatedExperiment = { ...experiment, ...updatedData };
         setExperiment(updatedExperiment);
         onUpdate(updatedExperiment);
+        if (!silent) {
+            addToast("Progress saved!", "success");
+        }
     };
 
     const handleSaveFineTune = (settings) => {
@@ -834,101 +543,63 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
             [activeStep]: settings
         };
         handleUpdate({ fineTuneSettings: updatedSettings });
-        addToast('Settings saved!', 'success');
     };
-
 
     const handleGenerate = async () => {
         if (!gemini) {
             addToast("Gemini API not initialized. Check your API Key.", 'danger');
             return;
         }
-        if (!userInput && activeStep !== 6 && activeStep !== 10) { // Step 6 and 10 can be triggered without input
-             if (activeStep !== 2) { // Step 2 uses context question
-                addToast("Please provide input for this step.", 'warning');
-                return;
-             }
+        if (!userInput.trim() && ![2, 5, 6, 10].includes(activeStep)) {
+             addToast("Please provide input for this step.", 'warning');
+             return;
         }
 
         setIsLoading(true);
         setStreamingOutput("");
 
-        const currentTimestamp = new Date().toISOString();
         const stepData = experiment.stepData[activeStep] || {};
         const oldHistory = stepData.history || [];
 
         // Save previous output to history if it exists
         if (stepData.output) {
-            const lastOutput = stepData.output;
             const lastTimestamp = stepData.history?.[oldHistory.length - 1]?.timestamp || experiment.createdAt;
-            oldHistory.push({ timestamp: lastTimestamp, output: lastOutput });
+            oldHistory.push({ timestamp: lastTimestamp, output: stepData.output });
         }
 
         const context = getStepContext(experiment, activeStep);
         const fineTuneSettings = experiment.fineTuneSettings[activeStep] || {};
-        const { basePrompt, systemInstruction, useSearch, expectJson } = getPromptForStep(activeStep, userInput, context, fineTuneSettings);
+        const { basePrompt, expectJson, config } = getPromptForStep(activeStep, userInput, context, fineTuneSettings);
 
         try {
-            const config: any = {
-                systemInstruction,
+            const updatedStepData = {
+                ...experiment.stepData,
+                [activeStep]: {
+                    ...stepData,
+                    input: userInput, // Always save the latest input used for generation
+                    history: oldHistory
+                }
             };
-            
-            if (useSearch) {
-                config.tools = [{ googleSearch: {} }];
-            }
 
-            // For JSON mode, use generateContent, not streaming
             if (expectJson) {
-                config.responseMimeType = "application/json";
-                config.responseSchema = DATA_ANALYZER_SCHEMA;
-
-                const response = await gemini.models.generateContent({
-                    model: 'gemini-2.5-flash',
-                    contents: basePrompt,
-                    config: config
-                });
+                const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
                 const text = response.text;
                 setStreamingOutput(text);
+                updatedStepData[activeStep].output = text;
 
-                handleUpdate({
-                    currentStep: Math.min(WORKFLOW_STEPS.length, experiment.currentStep + (experiment.currentStep === activeStep ? 1 : 0)),
-                    stepData: {
-                        ...experiment.stepData,
-                        [activeStep]: {
-                            input: userInput,
-                            output: text,
-                            history: oldHistory
-                        }
-                    }
-                });
-
-            } else { // Handle streaming for text
-                const response = await gemini.models.generateContentStream({
-                    model: 'gemini-2.5-flash',
-                    contents: basePrompt,
-                    config: config
-                });
-
+            } else {
+                const responseStream = await gemini.models.generateContentStream({ model: 'gemini-2.5-flash', contents: basePrompt, config });
                 let fullResponse = "";
-                for await (const chunk of response) {
+                for await (const chunk of responseStream) {
                     const chunkText = chunk.text;
                     fullResponse += chunkText;
                     setStreamingOutput(prev => prev + chunkText);
                 }
-
-                 // Update experiment state after streaming is complete
-                handleUpdate({
-                    currentStep: Math.min(WORKFLOW_STEPS.length, experiment.currentStep + (experiment.currentStep === activeStep ? 1 : 0)),
-                    stepData: {
-                        ...experiment.stepData,
-                        [activeStep]: {
-                            input: userInput,
-                            output: fullResponse,
-                            history: oldHistory
-                        }
-                    }
-                });
+                updatedStepData[activeStep].output = fullResponse;
             }
+            
+            // Update experiment state after generation is complete, without advancing the step
+            handleUpdate({ stepData: updatedStepData }, true); // Silent update
 
         } catch (error) {
             console.error("Gemini API Error:", error);
@@ -939,16 +610,24 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
     };
 
     const handleSaveOutput = (newOutput) => {
-        handleUpdate({
-            stepData: {
-                ...experiment.stepData,
-                [activeStep]: {
-                    ...experiment.stepData[activeStep],
-                    output: newOutput
-                }
+        const updatedStepData = {
+            ...experiment.stepData,
+            [activeStep]: {
+                ...experiment.stepData[activeStep],
+                output: newOutput
             }
-        });
-        addToast("Changes saved!", "success");
+        };
+        handleUpdate({ stepData: updatedStepData });
+    };
+
+    const handleCompleteStep = () => {
+        if (activeStep < WORKFLOW_STEPS.length) {
+            handleUpdate({ currentStep: activeStep + 1 });
+            setActiveStep(activeStep + 1);
+            addToast(`Step ${activeStep} completed. Moving to Step ${activeStep + 1}.`, 'success');
+        } else {
+            addToast("Congratulations! You have completed the final step.", 'success');
+        }
     };
 
     const currentStepInfo = WORKFLOW_STEPS.find(s => s.id === activeStep);
@@ -989,13 +668,11 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
                     <div className="card-body">
                         <p>{currentStepInfo.description}</p>
                         <hr />
-                        {/* Special UI for Step 6 */}
                         {activeStep === 6 ? (
                            <ExperimentRunner
                                 experiment={experiment}
-                                onUpdate={handleUpdate}
-                                onSynthesize={handleGenerate}
-                                isLoading={isLoading}
+                                onExperimentUpdate={handleUpdate}
+                                onStepComplete={handleCompleteStep}
                                 gemini={gemini}
                             />
                         ) : activeStep === 10 ? (
@@ -1016,16 +693,16 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
                                         rows={4}
                                         value={userInput}
                                         onChange={(e) => setUserInput(e.target.value)}
-                                        placeholder={isStepCompleted ? "This step is completed. Input is locked." : "Enter your notes, data, or prompt for this step..."}
-                                        disabled={isStepCompleted || isLoading}
+                                        placeholder={isLoadingSuggestion ? "AI is suggesting an initial input..." : (isStepCompleted ? "This step is completed. Input is locked." : "Enter your notes, data, or prompt for this step...")}
+                                        disabled={isStepCompleted || isLoading || isLoadingSuggestion}
                                     />
                                 </div>
 
                                 <div className="d-flex justify-content-end align-items-center">
-                                    <button
+                                     <button
                                         className="btn btn-primary"
                                         onClick={handleGenerate}
-                                        disabled={isLoading || isStepCompleted}
+                                        disabled={isLoading || isLoadingSuggestion || isStepCompleted}
                                     >
                                         {isLoading ? (
                                             <>
@@ -1033,12 +710,19 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
                                                 Generating...
                                             </>
                                         ) : (
-                                            <>
-                                                <i className="bi bi-stars me-2"></i>
-                                                {isStepCompleted ? 'Step Completed' : 'Generate'}
-                                            </>
+                                            <><i className="bi bi-stars me-2"></i>Generate</>
                                         )}
                                     </button>
+                                     {!isStepCompleted && (
+                                        <button
+                                            className="btn btn-success ms-2"
+                                            onClick={handleCompleteStep}
+                                            disabled={!output || isLoading || isLoadingSuggestion}
+                                        >
+                                            <i className="bi bi-check-circle-fill me-2"></i>
+                                            Complete Step & Continue
+                                        </button>
+                                    )}
                                 </div>
                             </>
                         )}
@@ -1047,7 +731,7 @@ const ExperimentWorkspace = ({ experiment: initialExperiment, onUpdate }) => {
                         <div className="card-footer">
                             <h5 className="fw-bold">AI Output</h5>
                             {isLoading && !streamingOutput && <div className="d-flex justify-content-center p-5"><div className="spinner-border" role="status"><span className="visually-hidden">Loading...</span></div></div>}
-                            {output && <GeneratedOutput output={output} stepId={activeStep} onSave={handleSaveOutput} isEditable={!isLoading} />}
+                            {output && <GeneratedOutput output={output} stepId={activeStep} onSave={handleSaveOutput} isEditable={!isLoading && !isStepCompleted} />}
                         </div>
                     )}
                 </div>
@@ -1085,8 +769,7 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
                     </select>
                 );
             case 'range':
-// FIX: Ensure value passed to range input is a number and correctly update state with a number.
-                const numericValue = parseFloat(value);
+                const numericValue = parseFloat(String(value)); // Ensure value is a string before parsing for robustness.
                 const displayValue = isNaN(numericValue) ? param.min : numericValue;
                 return (
                     <div className="d-flex align-items-center">
@@ -1119,30 +802,32 @@ const FineTuneModal = ({ settings = {}, onSave, onClose, stepId }) => {
     };
 
     return (
-        <div className="modal show" style={{ display: 'block' }} tabIndex={-1}>
-            <div className="modal-dialog modal-dialog-centered modal-lg">
-                <div className="modal-content">
-                    <div className="modal-header">
-                        <h5 className="modal-title">Fine-Tune AI Parameters (Step {stepId})</h5>
-                        <button type="button" className="btn-close" onClick={onClose}></button>
-                    </div>
-                    <div className="modal-body">
-                        {stepParams.length > 0 ? stepParams.map(param => (
-                             <div className="mb-4" key={param.name}>
-                                <label className="form-label fw-bold">{param.label}</label>
-                                <p className="form-text text-white-50 small mt-0 mb-2">{param.description}</p>
-                                {renderControl(param)}
-                            </div>
-                        )) : <p>No specific tuning parameters for this step.</p>}
-                    </div>
-                    <div className="modal-footer">
-                        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-                        <button type="button" className="btn btn-primary" onClick={handleSave}>Save Settings</button>
+        <>
+            <div className="modal show" style={{ display: 'block' }} tabIndex={-1} onClick={onClose}>
+                <div className="modal-dialog modal-dialog-centered modal-lg" onClick={e => e.stopPropagation()}>
+                    <div className="modal-content">
+                        <div className="modal-header">
+                            <h5 className="modal-title">Fine-Tune AI Parameters (Step {stepId})</h5>
+                            <button type="button" className="btn-close" onClick={onClose}></button>
+                        </div>
+                        <div className="modal-body">
+                            {stepParams.length > 0 ? stepParams.map(param => (
+                                <div className="mb-4" key={param.name}>
+                                    <label className="form-label fw-bold">{param.label}</label>
+                                    <p className="form-text text-white-50 small mt-0 mb-2">{param.description}</p>
+                                    {renderControl(param)}
+                                </div>
+                            )) : <p>No specific tuning parameters for this step.</p>}
+                        </div>
+                        <div className="modal-footer">
+                            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                            <button type="button" className="btn btn-primary" onClick={handleSave}>Save Settings</button>
+                        </div>
                     </div>
                 </div>
             </div>
             <div className="modal-backdrop fade show"></div>
-        </div>
+        </>
     );
 };
 
@@ -1226,11 +911,9 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
             
             if (chartConfig.data?.datasets) {
                 chartConfig.data.datasets.forEach(dataset => {
-// FIX: Ensure all data points from the API are parsed to numbers for the chart.
                     if (dataset.data) {
                         dataset.data = dataset.data.map(d => parseFloat(d)).filter(d => !isNaN(d));
                     }
-// FIX: Ensure borderWidth from the API is parsed to a number before being used by Chart.js.
                     if (dataset.borderWidth != null) {
                         const newBorderWidth = parseFloat(dataset.borderWidth);
                         if (!isNaN(newBorderWidth)) {
@@ -1327,331 +1010,6 @@ const GeneratedOutput = ({ output, stepId, onSave, isEditable }) => {
                 </div>
             )}
             <div dangerouslySetInnerHTML={{ __html: marked(output) }} />
-        </div>
-    );
-};
-
-
-const ExperimentRunner = ({ experiment, onUpdate, onSynthesize, isLoading, gemini }) => {
-    const [activeTab, setActiveTab] = useState('simulate'); // 'simulate', 'upload', 'docs'
-    const [code, setCode] = useState(experiment.simulationCode || `// Welcome to the Hypatia Simulator!
-// Use console.log() to print debug messages below.
-// When your simulation is complete, call hypatia.finish(data, summary)
-// to pass your results to the next step.
-
-console.log("Starting simulation...");
-
-// Example: Simulating a simple chemical reaction
-const initialConcentration = 1.0;
-let concentration = initialConcentration;
-let time = 0;
-const rate = 0.1;
-
-const dataPoints = ['Time (s),Concentration (M)'];
-
-while (time <= 10) {
-    dataPoints.push(\`\${time},\${concentration.toFixed(4)}\`);
-    concentration -= concentration * rate;
-    time++;
-}
-
-console.log("Simulation finished.");
-
-// Finalize the experiment and pass data to the analyzer
-const csvData = dataPoints.join('\\n');
-const summaryText = "The simulation shows an exponential decay in reactant concentration over 10 seconds, consistent with a first-order reaction model.";
-
-hypatia.finish(csvData, summaryText);
-`);
-    const [output, setOutput] = useState({ logs: [], error: null });
-    const [uploadedData, setUploadedData] = useState('');
-    const [isGeneratingTemplate, setIsGeneratingTemplate] = useState(false);
-    const fileInputRef = useRef(null);
-    const { addToast } = useToast();
-
-    const runCode = () => {
-        setOutput({ logs: [], error: null }); // Clear previous output
-        const logs = [];
-        let finishedSuccessfully = false;
-
-        // Create a sandboxed environment
-        const hypatia = {
-            finish: (data, summary) => {
-                if (typeof data !== 'string' || typeof summary !== 'string') {
-                    // This error will be caught by the outer try/catch block
-                    throw new Error("hypatia.finish() requires two string arguments: data and summary.");
-                }
-                const newStepData = {
-                    ...experiment.stepData,
-                    '6': {
-                        ...experiment.stepData['6'],
-                        output: summary // Save summary as the output of step 6
-                    },
-                    '7': {
-                        ...experiment.stepData['7'],
-                        input: data // Pass data as input to step 7
-                    }
-                };
-
-                // The onUpdate call saves the current code state along with the data.
-                onUpdate({
-                    simulationCode: code,
-                    stepData: newStepData,
-                    currentStep: 7
-                });
-
-                navigator.clipboard.writeText(data);
-                addToast("Simulation complete! Data passed to Step 7 and copied to clipboard.", "success");
-                
-                // Add success messages to the output console for better user feedback
-                logs.push(`✅ Simulation Finished Successfully.`);
-                logs.push(`Summary: ${summary}`);
-                logs.push(`Data has been passed to Step 7 and copied to your clipboard.`);
-                setOutput({ logs: [...logs], error: null });
-
-                finishedSuccessfully = true;
-            }
-        };
-
-        const consoleProxy = {
-            log: (...args) => {
-                logs.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
-                setOutput({ logs: [...logs], error: null });
-            }
-        };
-
-        try {
-            // Use the Function constructor to sandbox the code
-            const sandboxedRun = new Function('console', 'hypatia', code);
-            sandboxedRun(consoleProxy, hypatia);
-
-            if (!finishedSuccessfully) {
-                logs.push("🔵 Simulation code finished running without calling hypatia.finish().");
-                setOutput({ logs: [...logs], error: null });
-            }
-        } catch (e) {
-            setOutput({ logs, error: e.message });
-        }
-    };
-
-    const handleCodeChange = (newCode) => {
-        setCode(newCode);
-        // This ensures the code is saved as the user types, preserving their work.
-        onUpdate({ simulationCode: newCode });
-    };
-
-    const handleDownloadTemplate = async () => {
-        if (!gemini) {
-            addToast("Gemini API not initialized.", "danger");
-            return;
-        }
-        setIsGeneratingTemplate(true);
-        try {
-            const dataPlan = experiment.stepData['5']?.output;
-            if (!dataPlan) {
-                addToast("Data collection plan from Step 5 is missing. Providing generic template.", "warning");
-                const genericTemplate = "column_1,column_2,column_3";
-                const a = document.createElement("a");
-                const file = new Blob([genericTemplate], { type: 'text/csv' });
-                a.href = URL.createObjectURL(file);
-                a.download = 'template.csv';
-                a.click();
-                URL.revokeObjectURL(a.href);
-                return;
-            }
-
-            const prompt = `You are a data formatting expert. Your task is to create a CSV header row based on a data collection plan. Analyze the following data collection plan and extract the key variables to be measured. Format these variables as a single line of comma-separated values, which will serve as a CSV header. Your output must be ONLY this single line. Do not include any other text, explanations, or markdown formatting.\n\nData Collection Plan:\n"""\n${dataPlan}\n"""`;
-
-            const response = await gemini.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: prompt,
-            });
-
-            const template = response.text.trim();
-            const a = document.createElement("a");
-            const file = new Blob([template], { type: 'text/csv' });
-            a.href = URL.createObjectURL(file);
-            a.download = 'data_template.csv';
-            a.click();
-            URL.revokeObjectURL(a.href);
-
-        } catch (error) {
-            console.error("Template Generation Error:", error);
-            addToast(`Failed to generate template: ${error.message}`, 'danger');
-        } finally {
-            setIsGeneratingTemplate(false);
-        }
-    };
-
-    const handleFileSelect = (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                setUploadedData(e.target.result as string);
-                addToast(`${file.name} loaded successfully.`, 'success');
-            };
-            reader.readAsText(file);
-        }
-    };
-
-    const handleSubmitUploadedData = () => {
-        if (!uploadedData) {
-            addToast("No data has been uploaded.", "warning");
-            return;
-        }
-        const summaryText = "User-provided data was uploaded for analysis.";
-
-        const newStepData = {
-            ...experiment.stepData,
-            '6': {
-                ...experiment.stepData['6'],
-                output: summaryText
-            },
-            '7': {
-                ...experiment.stepData['7'],
-                input: uploadedData
-            }
-        };
-
-        onUpdate({
-            stepData: newStepData,
-            currentStep: 7
-        });
-
-        addToast("Data submitted! Proceed to Step 7 for analysis.", "success");
-    };
-
-
-    return (
-        <div>
-            <ul className="nav nav-tabs mb-3">
-                <li className="nav-item">
-                    <a className={`nav-link ${activeTab === 'simulate' ? 'active' : ''}`} href="#" onClick={() => setActiveTab('simulate')}>Run Custom Code</a>
-                </li>
-                 <li className="nav-item">
-                    <a className={`nav-link ${activeTab === 'upload' ? 'active' : ''}`} href="#" onClick={() => setActiveTab('upload')}>Upload Own Data</a>
-                </li>
-                <li className="nav-item">
-                    <a className={`nav-link ${activeTab === 'docs' ? 'active' : ''}`} href="#" onClick={() => setActiveTab('docs')}>Documentation</a>
-                </li>
-            </ul>
-
-            {activeTab === 'simulate' && (
-                <>
-                    <div className="mb-3">
-                        <textarea
-                            id="code-editor"
-                            className="form-control"
-                            value={code}
-                            onChange={(e) => handleCodeChange(e.target.value)}
-                            rows={15}
-                        />
-                    </div>
-                     <div className="d-flex justify-content-between align-items-center mb-3">
-                        <button className="btn btn-success" onClick={runCode}>
-                            <i className="bi bi-play-fill me-1"></i> Run Simulation
-                        </button>
-                        <button className="btn btn-outline-primary" onClick={onSynthesize} disabled={isLoading}>
-                             {isLoading ? (
-                                <>
-                                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                                    Synthesizing...
-                                </>
-                            ) : (
-                                <>
-                                    <i className="bi bi-magic me-1"></i> Skip & Synthesize Results
-                                </>
-                            )}
-                        </button>
-                    </div>
-                     <div>
-                        <h6 className="fw-bold">Output</h6>
-                         <div className={`code-output ${output.error ? 'error' : ''}`}>
-                            {output.logs.map((log, i) => <div key={i}>{'>'} {log}</div>)}
-                            {output.error && <div className="fw-bold">Error: {output.error}</div>}
-                        </div>
-                    </div>
-                </>
-            )}
-
-             {activeTab === 'upload' && (
-                <div className="p-2 text-center">
-                    <i className="bi bi-cloud-upload display-4 mb-3"></i>
-                    <h5>Upload Your Experimental Data</h5>
-                    <p className="text-white-50">If you've run your experiment offline, you can upload the results here. The data will be passed directly to the Data Analyzer step.</p>
-                    
-                    <div className="card my-4 text-start">
-                        <div className="card-body">
-                            <h6 className="card-title">1. Get a Data Template (Optional)</h6>
-                            <p className="card-text small text-white-50">Generate a CSV header based on your data collection plan from Step 5 to ensure your data is formatted correctly.</p>
-                            <button className="btn btn-outline-secondary" onClick={handleDownloadTemplate} disabled={isGeneratingTemplate}>
-                                {isGeneratingTemplate ? <><span className="spinner-border spinner-border-sm me-2"></span>Generating...</> : <><i className="bi bi-download me-1"></i> Download Template</>}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="card my-4 text-start">
-                        <div className="card-body">
-                            <h6 className="card-title">2. Upload Your Data File</h6>
-                            <p className="card-text small text-white-50">Select a CSV or text file from your computer. The contents will be displayed below for verification.</p>
-                            <input type="file" ref={fileInputRef} onChange={handleFileSelect} style={{ display: 'none' }} accept=".csv,.txt,.json" />
-                            <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
-                                <i className="bi bi-folder2-open me-1"></i> Choose File...
-                            </button>
-                            {uploadedData && (
-                                <textarea
-                                    className="form-control mt-3"
-                                    rows={8}
-                                    value={uploadedData}
-                                    readOnly
-                                    placeholder="Your uploaded data will appear here..."
-                                />
-                            )}
-                        </div>
-                    </div>
-                    
-                    <div className="d-grid">
-                        <button className="btn btn-success btn-lg" onClick={handleSubmitUploadedData} disabled={!uploadedData}>
-                            <i className="bi bi-arrow-right-circle-fill me-1"></i> Use This Data for Analysis
-                        </button>
-                    </div>
-                </div>
-            )}
-
-
-            {activeTab === 'docs' && (
-                <div className="doc-section">
-                    <h4>Simulator Documentation</h4>
-                    <p>Welcome to the Hypatia custom code simulator. This is a sandboxed JavaScript environment where you can run virtual experiments to generate data.</p>
-                    <h5>The `hypatia` Object</h5>
-                    <p>A special global object, `hypatia`, is available to connect your simulation back to the main application.</p>
-                    <p><strong>Function: </strong> `hypatia.finish(data, summary)`</p>
-                    <ul>
-                        <li>This is the most important function. Call it when your simulation has produced its final results.</li>
-                        <li>`data` (string): The raw data from your experiment. This should be in a machine-readable format like CSV or JSON. This data will become the input for Step 7: Data Analyzer.</li>
-                        <li>`summary` (string): A brief, human-readable summary of what the simulation did or found. This will be saved as the output for the current step (Step 6).</li>
-                    </ul>
-                     <h5>Example Usage</h5>
-                    <pre><code>{`
-const results = [
-  { time: 0, value: 10 },
-  { time: 1, value: 12 },
-  { time: 2, value: 15 }
-];
-
-// Convert results to a CSV string for the analyzer
-const csvData = "time,value\\n" + results.map(r => \`\${r.time},\${r.value}\`).join('\\n');
-
-const summaryText = "Generated 3 data points showing a positive trend.";
-
-// Pass data to the next step
-hypatia.finish(csvData, summaryText);
-                    `}</code></pre>
-                     <h5>Debugging</h5>
-                    <p>You can use `console.log()` to print messages, variables, and objects to the "Output" panel below the code editor. This is useful for debugging your simulation as you write it.</p>
-                </div>
-            )}
         </div>
     );
 };

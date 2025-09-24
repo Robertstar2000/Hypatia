@@ -1,0 +1,151 @@
+import { Type } from "@google/genai";
+
+// --- TYPE DEFINITIONS ---
+export interface StepData {
+    input?: string;
+    suggestedInput?: string;
+    output?: string;
+    history?: { timestamp: string; output: string }[];
+}
+
+export interface FineTuneSettings {
+    [key: string]: any;
+}
+
+export interface Experiment {
+    id: string;
+    title: string;
+    description: string;
+    field: (typeof SCIENTIFIC_FIELDS)[number];
+    currentStep: number;
+    stepData: { [key: number]: StepData };
+    fineTuneSettings: { [key: number]: FineTuneSettings };
+    createdAt: string;
+    simulationCode?: string;
+}
+
+export interface ToastContextType {
+    addToast: (message: string, type?: 'success' | 'danger' | 'warning' | 'info') => void;
+}
+
+
+// --- APPLICATION CONSTANTS ---
+
+export const SCIENTIFIC_FIELDS = [
+    "Biology", "Chemistry", "Physics", "Computer Science", "Medicine",
+    "Environmental Science", "Geology", "Astronomy", "Psychology",
+    "Sociology", "Materials Science", "Engineering"
+] as const;
+
+
+export const WORKFLOW_STEPS = [
+    { id: 1, title: 'Research Question', icon: 'bi-patch-question', description: "Refine your initial idea into a clear, focused, and testable research question." },
+    { id: 2, title: 'Literature Review', icon: 'bi-book', description: "Survey existing research to understand the current state of knowledge and identify gaps. This step uses Google Search for up-to-date results." },
+    { id: 3, title: 'Hypothesis Formulation', icon: 'bi-lightbulb', description: "Propose a clear, testable explanation for an observed phenomenon based on your literature review." },
+    { id: 4, title: 'Methodology Design', icon: 'bi-rulers', description: "Outline the step-by-step procedure you will use to test your hypothesis." },
+    { id: 5, title: 'Data Collection Plan', icon: 'bi-clipboard-data', description: "Detail how you will collect, record, and organize the data from your experiment." },
+    { id: 6, title: 'Experiment Runner / Data Synthesis', icon: 'bi-beaker', description: "Execute your experiment virtually by running a simulation, uploading your own data, or having the AI synthesize a plausible dataset." },
+    { id: 7, title: 'Data Analyzer', icon: 'bi-graph-up-arrow', description: "Process and analyze the collected data to identify patterns, relationships, and statistical significance. The AI will output a JSON object with a summary and chart suggestions." },
+    { id: 8, title: 'Conclusion Drawing', icon: 'bi-trophy', description: "Interpret the results of your analysis, determine if your hypothesis was supported, and discuss the implications of your findings." },
+    { id: 9, title: 'Peer Review Simulation', icon: 'bi-people', description: "Subject your findings and conclusions to a simulated critical review to identify weaknesses and strengthen your arguments." },
+    { id: 10, title: 'Publication Exporter', icon: 'bi-journal-richtext', description: "Assemble all the preceding steps into a cohesive, publication-ready scientific paper draft." }
+];
+
+export const STEP_SPECIFIC_TUNING_PARAMETERS = {
+    1: [
+        { name: 'scope', label: 'Scope', description: 'Define how broad or narrow the research question should be.', type: 'select', options: ['Specific', 'Broad', 'Exploratory'], default: 'Specific' },
+        { name: 'novelty', label: 'Novelty', description: 'Adjust how unique or groundbreaking the AI should aim for the question to be.', type: 'range', min: 0.1, max: 1.0, step: 0.1, default: 0.5 },
+        { name: 'questionStyle', label: 'Question Style', description: 'Defines the grammatical style and format of the research question.', type: 'select', options: ['Interrogative (Why/How)', 'Descriptive (What)', 'Comparative'], default: 'Interrogative (Why/How)' },
+        { name: 'targetAudience', label: 'Target Audience', description: 'Influences the complexity and jargon used in formulating the question.', type: 'select', options: ['Expert', 'Student', 'General Public'], default: 'Expert' }
+    ],
+    2: [
+        { name: 'sourceRecency', label: 'Source Recency', description: 'Prioritize literature by publication date. Note: This is a strong hint, not a strict filter.', type: 'select', options: ['Past Year', 'Past 5 Years', 'Any Time'], default: 'Past 5 Years' },
+        { name: 'reviewScope', label: 'Review Scope', description: 'Define the depth and breadth of the literature review summary.', type: 'select', options: ['Comprehensive', 'Targeted Summary', 'Key Papers Only'], default: 'Targeted Summary' },
+        { name: 'geographicalFocus', label: 'Geographical Focus', description: 'Narrow the search to studies from a specific region (if applicable).', type: 'select', options: ['Global', 'North America', 'Europe', 'Asia'], default: 'Global' },
+        { name: 'criticalStance', label: 'Critical Stance', description: 'Analyze sources for strengths and weaknesses, not just summarize.', type: 'boolean', default: true }
+    ],
+    3: [
+        { name: 'creativity', label: 'Creativity', description: 'Control the level of conventional vs. out-of-the-box thinking for hypotheses.', type: 'range', min: 0.1, max: 1.0, step: 0.1, default: 0.6 },
+        { name: 'hypothesis_count', label: 'Number of Hypotheses', description: 'Set how many distinct hypotheses the AI should generate.', type: 'select', options: ['2', '3', '4'], default: '3' },
+        { name: 'hypothesisType', label: 'Hypothesis Type', description: 'Specify the scientific format of the hypotheses (e.g., directional, null).', type: 'select', options: ['Directional', 'Non-directional', 'Null & Alternative'], default: 'Directional' },
+        { name: 'riskLevel', label: 'Risk Level', description: 'The boldness of the proposed hypotheses, from safe to high-risk/high-reward.', type: 'select', options: ['Conservative (High-likelihood)', 'Balanced', 'Bold (High-reward)'], default: 'Balanced' }
+    ],
+    4: [
+        { name: 'detail_level', label: 'Level of Detail', description: 'Specify the granularity of the methodology steps.', type: 'select', options: ['High-level overview', 'Detailed protocol', 'Step-by-step for replication'], default: 'Detailed protocol' },
+        { name: 'methodType', label: 'Methodology Type', description: 'Specify the primary research approach (e.g., quantitative, qualitative).', type: 'select', options: ['Quantitative', 'Qualitative', 'Mixed-Methods', 'Theoretical'], default: 'Quantitative' },
+        { name: 'feasibilityFocus', label: 'Feasibility Focus', description: 'Prioritize practicality (cost, time) over ideal scientific rigor, or vice versa.', type: 'boolean', default: true },
+        { name: 'ethicalConsiderations', label: 'Ethical Considerations', description: 'Ensure a dedicated section on ethical considerations is included.', type: 'boolean', default: true }
+    ],
+    5: [
+        { name: 'instrumentDetail', label: 'Instrument Detail', description: 'Specify how detailed the equipment/tool suggestions should be.', type: 'select', options: ['General instruments', 'Specify exact models/tools', 'Suggest software for collection'], default: 'General instruments' },
+        { name: 'samplingStrategy', label: 'Sampling Strategy', description: 'Suggest a specific sampling method for the data collection plan.', type: 'select', options: ['Random', 'Stratified', 'Convenience', 'AI Suggests Best'], default: 'AI Suggests Best' },
+        { name: 'dataSecurity', label: 'Data Security', description: 'Include measures for data security, privacy, and anonymization in the plan.', type: 'boolean', default: false },
+        { name: 'formatSuggestion', label: 'Format Suggestion', description: 'Suggest a specific file format or structure for data storage.', type: 'select', options: ['CSV', 'JSON', 'Spreadsheet', 'Database Schema'], default: 'CSV' }
+    ],
+    7: [
+        { name: 'statisticalApproach', label: 'Statistical Approach', description: 'Guide the type of statistical analysis to be performed.', type: 'select', options: ['Descriptive', 'Inferential (t-tests, ANOVA)', 'Predictive (Regression)', 'AI Default'], default: 'AI Default' },
+        { name: 'visualizationEmphasis', label: 'Visualization Emphasis', description: 'A higher value suggests more diverse and numerous chart types.', type: 'range', min: 0.2, max: 1.0, step: 0.2, default: 0.6 },
+        { name: 'assumeAudience', label: 'Audience for Summary', description: 'Tailor the language in the analysis summary for a specific audience.', type: 'select', options: ['Technical Expert', 'Business Stakeholder', 'Layperson'], default: 'Technical Expert' },
+        { name: 'identifyOutliers', label: 'Identify Outliers', description: 'Explicitly identify and comment on potential outliers in the data.', type: 'boolean', default: true }
+    ],
+    8: [
+        { name: 'conclusionTone', label: 'Conclusion Tone', description: 'Set the tone of the conclusion, from highly confident to more reserved.', type: 'select', options: ['Confident', 'Cautious', 'Objective & Neutral'], default: 'Objective & Neutral' },
+        { name: 'futureWork', label: 'Suggest Future Work', description: 'Include a section with specific, actionable suggestions for future research.', type: 'boolean', default: true },
+        { name: 'practicalImplications', label: 'Practical Implications', description: 'Discuss the practical, real-world applications or implications of the findings.', type: 'boolean', default: false },
+        { name: 'limitationDetail', label: 'Limitation Detail', description: 'Specify how deeply the limitations of the study should be discussed.', type: 'select', options: ['Briefly mention', 'Detailed discussion', 'Categorize limitations'], default: 'Detailed discussion' }
+    ],
+    9: [
+        { name: 'reviewerPersona', label: 'Reviewer Persona', description: 'Choose the personality of the simulated peer reviewer.', type: 'select', options: ['Harsh Critic', 'Supportive Colleague', 'Methodology Expert', 'Journal Editor', 'Skeptical Statistician', 'Big Picture Thinker'], default: 'Harsh Critic' },
+        { name: 'focus_area', label: 'Focus Area', description: 'Direct the reviewer to focus on a specific part of your research.', type: 'select', options: ['Overall Cohesion', 'Methodology Rigor', 'Conclusion Strength', 'Novelty & Impact'], default: 'Overall Cohesion' },
+        { name: 'reviewFormat', label: 'Review Format', description: 'Define the structure of the feedback provided by the reviewer.', type: 'select', options: ['Numbered List', 'Prose Paragraphs', 'Q&A Format'], default: 'Numbered List' },
+        { name: 'actionability', label: 'Actionability', description: 'Ensure the review provides actionable suggestions, not just identifies flaws.', type: 'boolean', default: true }
+    ],
+    10: [
+        { name: 'targetJournal', label: 'Target Journal Style', description: 'Tailor the tone, structure, and formatting to a specific type of academic journal.', type: 'select', options: ['High-Impact (Nature/Science)', 'Specialized Field Journal', 'General Open Access', 'Pre-print Server (arXiv)'], default: 'Specialized Field Journal' },
+        { name: 'abstractLength', label: 'Abstract Length', description: 'Set the approximate word count for the abstract.', type: 'select', options: ['Concise (~150 words)', 'Standard (~250 words)', 'Extended (~400 words)'], default: 'Standard (~250 words)' },
+        { name: 'authorVoice', label: 'Author Voice', description: 'Choose the narrative voice for the paper.', type: 'select', options: ['Formal Third-Person', 'Active First-Person Plural ("We found...")'], default: 'Formal Third-Person' },
+        { name: 'keywords', label: 'Generate Keywords', description: 'Generate a list of 5-7 relevant keywords for indexing.', type: 'boolean', default: true }
+    ]
+};
+
+/**
+ * @const DATA_ANALYZER_SCHEMA
+ * Defines the expected JSON structure for the output of Step 7 (Data Analyzer).
+ * This ensures the AI provides data in a consistent, parsable format for rendering charts.
+ */
+export const DATA_ANALYZER_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        summary: {
+            type: Type.STRING,
+            description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format."
+        },
+        chartSuggestions: {
+            type: Type.ARRAY,
+            description: "An array of chart configurations suggested for visualizing the data. Each object should be a valid Chart.js configuration.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    type: {
+                        type: Type.STRING,
+                        description: "The type of chart (e.g., 'bar', 'line', 'pie', 'scatter')."
+                    },
+                    data: {
+                        type: Type.OBJECT,
+                        description: "The data object for Chart.js, including labels and datasets."
+                    },
+                    options: {
+                        type: Type.OBJECT,
+                        description: "The options object for Chart.js, including scales, plugins, etc.",
+                        properties: {
+                           scales: {
+                               type: Type.OBJECT,
+                               description: "Configuration for the chart's axes. Can be empty for charts like 'pie'."
+                           }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};

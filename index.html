@@ -17,6 +17,9 @@
             --primary-glow: #00f2fe;
             --secondary-glow: #a64aff;
         }
+        html {
+            scroll-behavior: smooth;
+        }
         body {
             background: linear-gradient(135deg, #10122d, #1a0b32);
             background-attachment: fixed;
@@ -91,6 +94,7 @@
             border: none;
             border-bottom: 3px solid transparent;
             color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
         }
         .nav-tabs .nav-link.active {
             color: var(--primary-glow);
@@ -308,7 +312,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
+            min-height: 90vh;
             padding: 2rem;
             text-align: center;
             background-image: linear-gradient(rgba(16, 18, 45, 0.85), rgba(26, 11, 50, 0.85)), url('https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?q=80&w=2070&auto=format&fit=crop');
@@ -437,6 +441,18 @@
             color: rgba(255, 255, 255, 0.5);
             background: #10122d;
             border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .api-key-section {
+            padding-bottom: 3rem;
+        }
+        .research-summary-section blockquote {
+            background: rgba(0,0,0,0.1);
+            border-left: 4px solid var(--secondary-glow);
+            margin: 0;
+            color: #e0e0e0;
+        }
+        .research-summary-section blockquote p {
+            margin-bottom: 0;
         }
 
     </style>

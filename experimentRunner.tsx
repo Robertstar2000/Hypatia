@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { Experiment } from './config';
@@ -20,10 +21,11 @@ export const ExperimentRunner = ({ experiment, onExperimentUpdate, onStepComplet
     const { addToast } = useToast();
 
     const handleDataSubmission = (data: string, summary: string) => {
+        const currentStepData = experiment.stepData || {};
         const newStepData = {
-            ...experiment.stepData,
-            '6': { ...experiment.stepData['6'], output: summary },
-            '7': { ...experiment.stepData['7'], input: data }
+            ...currentStepData,
+            6: { ...(currentStepData[6] || {}), output: summary },
+            7: { ...(currentStepData[7] || {}), input: data }
         };
         onExperimentUpdate({ stepData: newStepData }, true);
         addToast("Data submitted successfully! You can now complete this step.", "success");

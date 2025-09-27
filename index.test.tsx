@@ -30,6 +30,8 @@ const Type = {
     OBJECT: 'OBJECT',
     STRING: 'STRING',
     ARRAY: 'ARRAY',
+    NUMBER: 'NUMBER',
+    BOOLEAN: 'BOOLEAN',
 };
 
 const STEP_SPECIFIC_TUNING_PARAMETERS = {
@@ -56,7 +58,35 @@ const DATA_ANALYZER_SCHEMA = {
                     },
                     data: {
                         type: Type.OBJECT,
-                        description: "The data object for Chart.js, including labels and datasets."
+                        description: "The data object for Chart.js, including labels and datasets.",
+                        properties: {
+                            labels: {
+                                type: Type.ARRAY,
+                                items: { type: Type.STRING }
+                            },
+                            datasets: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        label: { type: Type.STRING },
+                                        data: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.NUMBER }
+                                        },
+                                        backgroundColor: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        borderColor: {
+                                            type: Type.ARRAY,
+                                            items: { type: Type.STRING }
+                                        },
+                                        borderWidth: { type: Type.NUMBER }
+                                    }
+                                }
+                            }
+                        }
                     },
                     options: {
                         type: Type.OBJECT,
@@ -64,7 +94,27 @@ const DATA_ANALYZER_SCHEMA = {
                         properties: {
                            scales: {
                                type: Type.OBJECT,
-                               description: "Configuration for the chart's axes. Can be empty for charts like 'pie'."
+                               description: "Configuration for the chart's axes. Can be empty for charts like 'pie'.",
+                               properties: {
+                                   y: {
+                                       type: Type.OBJECT,
+                                       properties: {
+                                           beginAtZero: { type: Type.BOOLEAN }
+                                       }
+                                   },
+                                   x: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            title: {
+                                                type: Type.OBJECT,
+                                                properties: {
+                                                    display: {type: Type.BOOLEAN},
+                                                    text: {type: Type.STRING}
+                                                }
+                                            }
+                                        }
+                                   }
+                               }
                            }
                         }
                     }

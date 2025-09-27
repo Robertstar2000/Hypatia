@@ -17,7 +17,8 @@ import {
     initializeGemini,
     getStepContext,
     getPromptForStep,
-    getPromptForInputSuggestion
+    getPromptForInputSuggestion,
+    testApiKey,
 } from './services';
 import { ToastProvider, useToast } from './toast';
 import { ExperimentRunner } from './experimentRunner';
@@ -44,6 +45,9 @@ const App = () => {
     const [experiments, setExperiments] = useState<Experiment[]>([]);
     const [activeExperiment, setActiveExperiment] = useState<Experiment | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isKeyValidated, setIsKeyValidated] = useState(false);
+    const authSectionRef = useRef<HTMLDivElement>(null);
+
 
     const { addToast } = useToast();
 
@@ -53,6 +57,10 @@ const App = () => {
             try {
                 const storedExperiments = await db.experiments.orderBy('createdAt').reverse().toArray();
                 setExperiments(storedExperiments);
+                // Set the most recent experiment as active by default to show summary
+                if (storedExperiments.length > 0) {
+                    setActiveExperiment(storedExperiments[0]);
+                }
             } catch (error) {
                 console.error("Failed to load experiments from database:", error);
                 addToast("Could not load saved experiments.", 'danger');
@@ -62,6 +70,14 @@ const App = () => {
         };
         loadData();
     }, [addToast]);
+    
+    const handleKeyValidation = (isValid: boolean) => {
+        setIsKeyValidated(isValid);
+        if (isValid) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
 
     // Handlers for experiment management
     const createNewExperiment = async (title: string, description: string, field: (typeof SCIENTIFIC_FIELDS)[number]) => {
@@ -72,7 +88,11 @@ const App = () => {
             description,
             field,
             currentStep: 1,
-            stepData: {},
+            stepData: {
+                1: {
+                    input: `Title: ${title}\n\nDescription: ${description}`
+                }
+            },
             fineTuneSettings: {},
             createdAt: new Date().toISOString(),
         };
@@ -81,10 +101,10 @@ const App = () => {
             setExperiments(prev => [newExperiment, ...prev]);
             setActiveExperiment(newExperiment);
             setView('experiment');
-            addToast("New experiment created successfully!", 'success');
+            addToast("New research project created successfully!", 'success');
         } catch (error) {
             console.error("Failed to save new experiment:", error);
-            addToast("Failed to create experiment.", 'danger');
+            addToast("Failed to create project.", 'danger');
         }
     };
 
@@ -100,7 +120,7 @@ const App = () => {
     };
 
     const deleteExperiment = async (id: string) => {
-        if (window.confirm("Are you sure you want to delete this experiment? This action cannot be undone.")) {
+        if (window.confirm("Are you sure you want to delete this project? This action cannot be undone.")) {
             try {
                 await db.experiments.delete(id);
                 const updatedExperiments = experiments.filter(e => e.id !== id);
@@ -109,10 +129,10 @@ const App = () => {
                     setActiveExperiment(null);
                     setView('dashboard');
                 }
-                addToast("Experiment deleted.", 'success');
+                addToast("Project deleted.", 'success');
             } catch (error) {
                 console.error("Failed to delete experiment:", error);
-                addToast("Failed to delete experiment.", 'danger');
+                addToast("Failed to delete project.", 'danger');
             }
         }
     };
@@ -134,7 +154,14 @@ const App = () => {
         <>
             <Header setView={setView} activeView={view} />
             <main className="container-fluid mt-4">
-                {view === 'landing' && <LandingPage setView={setView} createNewExperiment={createNewExperiment} />}
+                {view === 'landing' && <LandingPage 
+                    setView={setView} 
+                    createNewExperiment={createNewExperiment}
+                    onAuthenticate={handleKeyValidation}
+                    isKeyValidated={isKeyValidated}
+                    authSectionRef={authSectionRef}
+                    activeExperiment={activeExperiment}
+                />}
                 {view === 'dashboard' && <Dashboard experiments={experiments} onSelect={selectExperiment} onDelete={deleteExperiment} setView={setView} createNewExperiment={createNewExperiment}/>}
                 {view === 'experiment' && activeExperiment && <ExperimentWorkspace key={activeExperiment.id} experiment={activeExperiment} onUpdate={updateExperiment} />}
                 {view === 'testing' && <TestRunner />}
@@ -202,16 +229,124 @@ const Footer = () => (
 );
 
 
-const LandingPage = ({ setView, createNewExperiment }) => {
+const ApiKeySection = ({ onAuthenticate }) => {
+    const [authMode, setAuthMode] = useState('promo'); // 'promo' or 'key'
+    const [promoCode, setPromoCode] = useState('');
+    const [userApiKey, setUserApiKey] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const { addToast } = useToast();
+
+    const handleValidate = async () => {
+        setIsLoading(true);
+        if (authMode === 'promo') {
+            // Case-insensitive and trimmed check for the promo code
+            if (promoCode.trim().toLowerCase() === 'rm2214ri') {
+                initializeGemini(); // Use project's built-in key
+                addToast("Promo code accepted!", 'success');
+                onAuthenticate(true);
+            } else {
+                addToast("Invalid promo code. Please try again or use your own API key.", 'danger');
+                onAuthenticate(false);
+            }
+        } else { // 'key' mode
+            if (!userApiKey.trim()) {
+                addToast("Please enter your API key.", 'warning');
+                setIsLoading(false);
+                return;
+            }
+            const isValid = await testApiKey(userApiKey.trim());
+            if (isValid) {
+                initializeGemini(userApiKey.trim()); // Initialize with the user's provided key
+                addToast("API Key validated successfully!", 'success');
+                onAuthenticate(true);
+            } else {
+                addToast("API Key is not valid. Please check your key and try again.", 'danger');
+                onAuthenticate(false);
+            }
+        }
+        setIsLoading(false);
+    };
+
+    return (
+        <section className="api-key-section text-center">
+            <div className="container">
+                <div className="row justify-content-center">
+                    <div className="col-lg-8">
+                        <h2 className="section-title">API Key Access</h2>
+                        <p className="lead text-white-50">This application requires a Google Gemini API key to function. Please choose an option below.</p>
+                        <div className="card">
+                            <div className="card-header">
+                                <ul className="nav nav-tabs card-header-tabs">
+                                    <li className="nav-item">
+                                        <button className={`nav-link ${authMode === 'promo' ? 'active' : ''}`} onClick={() => setAuthMode('promo')}>Use Promo Code</button>
+                                    </li>
+                                    <li className="nav-item">
+                                        <button className={`nav-link ${authMode === 'key' ? 'active' : ''}`} onClick={() => setAuthMode('key')}>Use Your Own API Key</button>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div className="card-body p-4">
+                                {authMode === 'promo' ? (
+                                    <div>
+                                        <h5>Enter Promo Code</h5>
+                                        <p className="text-white-50">If you have a valid promo code, enter it here to use the application's built-in API key.</p>
+                                        <div className="input-group">
+                                            <input type="password" className="form-control" placeholder="Promo Code" value={promoCode} onChange={e => setPromoCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleValidate()} />
+                                            <button className="btn btn-primary" onClick={handleValidate} disabled={isLoading}>
+                                                {isLoading ? 'Validating...' : 'Validate'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <h5>Enter Your Google API Key</h5>
+                                        <p className="text-white-50">
+                                            You can get your own free API key from Google AI Studio. The key will be stored securely in your browser's session and not sent anywhere else.
+                                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="ms-2">Get a key here <i className="bi bi-box-arrow-up-right"></i></a>
+                                        </p>
+                                        <div className="input-group">
+                                            <input type="password" className="form-control" placeholder="Enter your API key" value={userApiKey} onChange={e => setUserApiKey(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleValidate()} />
+                                            <button className="btn btn-primary" onClick={handleValidate} disabled={isLoading}>
+                                                {isLoading ? 'Validating...' : 'Validate & Use Key'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+
+const LandingPage = ({ setView, createNewExperiment, onAuthenticate, isKeyValidated, authSectionRef, activeExperiment }) => {
      const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [field, setField] = useState<(typeof SCIENTIFIC_FIELDS)[number]>(SCIENTIFIC_FIELDS[0]);
+    const { addToast } = useToast();
 
     const handleStart = (e) => {
         e.preventDefault();
+        if (!isKeyValidated) {
+            addToast("Please complete the API Key Access step below to begin.", 'warning');
+            authSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
         if(title.trim() && description.trim()){
             createNewExperiment(title, description, field);
         }
+    };
+
+    const handleGoToDashboard = () => {
+        if (!isKeyValidated) {
+            addToast("Please complete the API Key Access step below to continue.", 'warning');
+            authSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+        setView('dashboard');
     };
     
     return (
@@ -237,9 +372,9 @@ const LandingPage = ({ setView, createNewExperiment }) => {
 
                      <div className="getting-started-fields mx-auto">
                          <form onSubmit={handleStart}>
-                             <p className="fw-bold text-light">Start a New Experiment</p>
+                             <p className="fw-bold text-light">Start a New Research Project</p>
                             <div className="mb-3">
-                                <input type="text" className="form-control" placeholder="Experiment Title" value={title} onChange={e => setTitle(e.target.value)} required />
+                                <input type="text" className="form-control" placeholder="Project Title" value={title} onChange={e => setTitle(e.target.value)} required />
                             </div>
                             <div className="mb-3">
                                  <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
@@ -253,6 +388,9 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                                 <i className="bi bi-play-circle me-2"></i> Begin Research
                             </button>
                          </form>
+                         <p className="mt-3 text-warning small">
+                            Be sure to read and edit AI output to keep the project aligned with your needs. Depending on project complexity, agentic AI generation can take several minutes per step—please be patient.
+                        </p>
                     </div>
 
                     <p className="mt-4 text-white-50 small">
@@ -263,6 +401,10 @@ const LandingPage = ({ setView, createNewExperiment }) => {
 
              <section className="landing-details-section">
                 <div className="container">
+
+                    <ResearchSummary activeExperiment={activeExperiment} />
+                    <hr className="landing-divider" />
+
                     <div className="row text-center mb-5">
                         <div className="col-md-8 mx-auto">
                             <h2 className="section-title">A Comprehensive Toolkit for Modern Research</h2>
@@ -350,16 +492,103 @@ const LandingPage = ({ setView, createNewExperiment }) => {
                         ))}
                     </div>
                      <div className="text-center mt-5">
-                        <button className="btn btn-primary btn-lg" onClick={() => setView('dashboard')}>
+                        <button className="btn btn-primary btn-lg" onClick={handleGoToDashboard}>
                             <i className="bi bi-rocket-takeoff me-2"></i>
                             Go to Dashboard
                         </button>
+                    </div>
+
+                    <hr className="landing-divider" />
+                    
+                    <div ref={authSectionRef}>
+                         <ApiKeySection onAuthenticate={onAuthenticate} />
                     </div>
                 </div>
             </section>
         </div>
     );
 }
+
+const ResearchSummary = ({ activeExperiment }) => {
+    const [summary, setSummary] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const gemini = useMemo(() => initializeGemini(), []);
+    const { addToast } = useToast();
+
+    useEffect(() => {
+        const generateSummary = async () => {
+            const latestCompletedStep = activeExperiment ? activeExperiment.currentStep - 1 : 0;
+            if (!gemini || !activeExperiment || latestCompletedStep < 1) {
+                setSummary('');
+                return;
+            }
+
+            const latestStepData = activeExperiment.stepData[latestCompletedStep];
+            const latestOutput = latestStepData?.output;
+            const latestStepInfo = WORKFLOW_STEPS.find(s => s.id === latestCompletedStep);
+
+            if (!latestOutput || !latestStepInfo) {
+                setSummary('');
+                return;
+            }
+
+            setIsLoading(true);
+            try {
+                const prompt = `Concisely summarize the current state of the following research project in 2-3 sentences. Be encouraging and forward-looking.
+
+                Title: ${activeExperiment.title}
+                Description: ${activeExperiment.description}
+
+                Latest Progress (${latestStepInfo.title}):
+                ${latestOutput.substring(0, 1000)}...`; // Truncate to avoid huge prompts
+
+                const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+                setSummary(response.text);
+            } catch (error) {
+                console.error("Failed to generate summary:", error);
+                addToast("Could not generate research summary.", 'warning');
+                setSummary(''); // Clear summary on error
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        generateSummary();
+    }, [activeExperiment, gemini, addToast]);
+
+    let content;
+    if (isLoading) {
+        content = (
+            <div className="d-flex align-items-center justify-content-center p-4">
+                <div className="spinner-border spinner-border-sm me-3" role="status"></div>
+                <span>Generating research summary...</span>
+            </div>
+        );
+    } else if (summary) {
+        content = <blockquote className="blockquote text-center fst-italic p-3" dangerouslySetInnerHTML={{ __html: marked(summary) }} />;
+    } else {
+        content = (
+            <div className="text-center p-4">
+                <p className="mb-0 text-white-50">Start or continue a project to see a live research summary here.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="research-summary-section">
+             <div className="row text-center mb-4">
+                <div className="col-md-8 mx-auto">
+                    <h2 className="section-title">Live Research Summary</h2>
+                </div>
+            </div>
+            <div className="card my-4">
+                <div className="card-body">
+                    {content}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperiment }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -381,9 +610,9 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
     return (
         <div className="container">
             <div className="d-flex justify-content-between align-items-center mb-4">
-                <h1 className="mb-0">Experiment Dashboard</h1>
+                <h1 className="mb-0">Project Dashboard</h1>
                 <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
-                    <i className="bi bi-plus-circle me-2"></i>New Experiment
+                    <i className="bi bi-plus-circle me-2"></i>New Research Project
                 </button>
             </div>
             {experiments.length > 0 ? (
@@ -411,8 +640,8 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
             ) : (
                  <div className="text-center p-5 dashboard-empty-state">
                      <i className="bi bi-journal-x display-4 mb-3"></i>
-                    <h4>No Experiments Yet</h4>
-                    <p>Click "New Experiment" to start your first research project.</p>
+                    <h4>No Projects Yet</h4>
+                    <p>Click "New Research Project" to start your first research project.</p>
                 </div>
             )}
 
@@ -421,7 +650,7 @@ const Dashboard = ({ experiments, onSelect, onDelete, setView, createNewExperime
                     <div className="modal-dialog modal-dialog-centered">
                         <div className="modal-content">
                             <div className="modal-header">
-                                <h5 className="modal-title">Create New Experiment</h5>
+                                <h5 className="modal-title">Create New Research Project</h5>
                                 <button type="button" className="btn-close" onClick={() => setIsModalOpen(false)}></button>
                             </div>
                              <form onSubmit={handleCreate}>
@@ -472,15 +701,49 @@ const ExperimentWorkspace: React.FC<ExperimentWorkspaceProps> = ({ experiment: i
 
     const gemini = useMemo(() => initializeGemini(), []);
     const { addToast } = useToast();
+    
+    // --- AUTOSAVE REFS AND LOGIC ---
+    const latestExperimentRef = useRef(experiment);
+    const debounceTimerRef = useRef<number | null>(null);
+    const isInitialInputSet = useRef(true);
+
+    // Keep ref updated with the latest experiment state for savers
+    useEffect(() => {
+        latestExperimentRef.current = experiment;
+    }, [experiment]);
+
+    // Interval-based auto-save (every 60s) as a fallback
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            onUpdate(latestExperimentRef.current);
+            addToast("Progress auto-saved.", 'info');
+        }, 60000);
+
+        return () => clearInterval(intervalId);
+    }, [onUpdate, addToast]);
+    // --- END AUTOSAVE LOGIC ---
+
+    const handleUpdate = useCallback((updatedData, silent = false) => {
+        setExperiment(prevExperiment => {
+            const updatedExperiment = { ...prevExperiment, ...updatedData };
+            onUpdate(updatedExperiment);
+            if (!silent) {
+                addToast("Progress saved!", "success");
+            }
+            return updatedExperiment;
+        });
+    }, [onUpdate, addToast]);
 
     // Effect for handling step changes and generating initial input suggestions
     useEffect(() => {
         const currentStepData = experiment.stepData[activeStep];
         setStreamingOutput(""); // Clear streaming output when step changes
+        
+        isInitialInputSet.current = true; // Flag to prevent immediate auto-save on load
 
-        // If the user navigates to the current, uncompleted step, and there's no output yet,
+        // If the user navigates to the current, uncompleted step, and there's no output, input, or suggestion yet,
         // generate a suggestion for the input.
-        if (activeStep === experiment.currentStep && !currentStepData?.output && !currentStepData?.suggestedInput) {
+        if (activeStep === experiment.currentStep && !currentStepData?.output && !currentStepData?.suggestedInput && !currentStepData?.input) {
              const generateSuggestedInput = async () => {
                 if (!gemini) return;
                 setIsLoadingSuggestion(true);
@@ -524,18 +787,42 @@ const ExperimentWorkspace: React.FC<ExperimentWorkspaceProps> = ({ experiment: i
             // Otherwise, just load the existing input for the step.
             setUserInput(currentStepData?.input || '');
         }
+        
+        // After all potential state updates, unset the flag to allow user-driven changes to trigger saves
+        setTimeout(() => { isInitialInputSet.current = false; }, 200);
 
-    }, [activeStep, experiment.currentStep, gemini]);
+    }, [activeStep, experiment.currentStep, gemini, handleUpdate]);
 
 
-    const handleUpdate = (updatedData, silent = false) => {
-        const updatedExperiment = { ...experiment, ...updatedData };
-        setExperiment(updatedExperiment);
-        onUpdate(updatedExperiment);
-        if (!silent) {
-            addToast("Progress saved!", "success");
+    // Debounced auto-save for user input
+    useEffect(() => {
+        if (isInitialInputSet.current || isLoadingSuggestion) {
+            return; // Don't save on initial load or while AI is generating suggestion
         }
-    };
+        const savedInput = experiment.stepData[activeStep]?.input || '';
+        if (userInput === savedInput) {
+            return; // Don't save if content is unchanged
+        }
+
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+
+        debounceTimerRef.current = window.setTimeout(() => {
+            const updatedStepData = {
+                ...experiment.stepData,
+                [activeStep]: {
+                    ...experiment.stepData[activeStep],
+                    input: userInput,
+                },
+            };
+            handleUpdate({ stepData: updatedStepData }, true); // Silent save
+            addToast("Input changes saved.", 'info');
+        }, 2000); // 2-second delay
+
+        return () => {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        };
+    }, [userInput, activeStep, experiment.stepData, isLoadingSuggestion, handleUpdate, addToast]);
+
 
     const handleSaveFineTune = (settings) => {
         const updatedSettings = {
@@ -630,6 +917,41 @@ const ExperimentWorkspace: React.FC<ExperimentWorkspaceProps> = ({ experiment: i
         }
     };
 
+    const handleDownloadStep = useCallback(() => {
+        const currentStepInfo = WORKFLOW_STEPS.find(s => s.id === activeStep);
+        if (!currentStepInfo) return;
+
+        const currentOutput = streamingOutput || experiment.stepData[activeStep]?.output || "No output generated yet.";
+        const currentInput = userInput || "No input provided for this step.";
+
+        const content = `
+# Project: ${experiment.title}
+## Step ${activeStep}: ${currentStepInfo.title}
+
+### Input
+---
+${currentInput}
+
+### AI Output
+---
+${currentOutput}
+        `.trim();
+
+        const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeTitle = experiment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const safeStepTitle = currentStepInfo.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `${safeTitle}_step_${activeStep}_${safeStepTitle}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        addToast("Step data downloaded!", 'info');
+    }, [activeStep, experiment, userInput, streamingOutput, addToast]);
+
+
     const currentStepInfo = WORKFLOW_STEPS.find(s => s.id === activeStep);
     const output = streamingOutput || experiment.stepData[activeStep]?.output;
     const isStepCompleted = experiment.currentStep > activeStep;
@@ -661,9 +983,14 @@ const ExperimentWorkspace: React.FC<ExperimentWorkspaceProps> = ({ experiment: i
                 <div className="card">
                     <div className="card-header d-flex justify-content-between align-items-center">
                          <h4 className="mb-0"><i className={`bi ${currentStepInfo.icon} me-2`}></i> Step {activeStep}: {currentStepInfo.title}</h4>
-                          <button className="btn btn-sm btn-outline-light" onClick={() => setFineTuneModalOpen(true)}>
-                            <i className="bi bi-sliders me-1"></i> Fine-Tune AI
-                        </button>
+                         <div className="d-flex gap-2">
+                            <button className="btn btn-sm btn-outline-secondary" onClick={handleDownloadStep}>
+                                <i className="bi bi-download me-1"></i> Download Step
+                            </button>
+                            <button className="btn btn-sm btn-outline-light" onClick={() => setFineTuneModalOpen(true)}>
+                                <i className="bi bi-sliders me-1"></i> Fine-Tune AI
+                            </button>
+                        </div>
                     </div>
                     <div className="card-body">
                         <p>{currentStepInfo.description}</p>
@@ -1031,10 +1358,10 @@ const CommentsModal = ({ experiment, onClose }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        const subject = `Feedback on Hypatia Experiment: ${experiment.title}`;
+        const subject = `Feedback on Hypatia Project: ${experiment.title}`;
         const body = `
-Experiment Title: ${experiment.title}
-Experiment Description: ${experiment.description}
+Project Title: ${experiment.title}
+Project Description: ${experiment.description}
 Date: ${new Date().toLocaleDateString()}
 -----------------------------------------
 
@@ -1072,11 +1399,11 @@ ${formData.comments}
                         </div>
                         <div className="modal-body">
                             <div className="mb-3">
-                                <label className="form-label small text-white-50">Experiment Title</label>
+                                <label className="form-label small text-white-50">Project Title</label>
                                 <input type="text" className="form-control" value={experiment.title} readOnly disabled />
                             </div>
                              <div className="mb-3">
-                                <label className="form-label small text-white-50">Experiment Description</label>
+                                <label className="form-label small text-white-50">Project Description</label>
                                 <textarea className="form-control" value={experiment.description} readOnly disabled rows={2}></textarea>
                             </div>
                             <hr />
@@ -1136,19 +1463,48 @@ ${formData.comments}
 const PublicationExporter = ({ experiment, onGenerate, isLoading, output, onSaveOutput }) => {
     const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
 
-    const handleExport = (format) => {
-        let content = ``;
-        if (format === 'markdown') {
-            content = `# ${experiment.title}\n\n${output}`;
-        } else { // text
-            content = `${experiment.title}\n\n${output.replace(/#+\s/g, '')}`;
+    const handleExport = (format: 'markdown' | 'text') => {
+        let finalContent = '';
+        const paperTitle = `# ${experiment.title}\n\n`;
+
+        // Part 1: The Final Paper (as edited by the user)
+        const paperContent = output || "No publication draft generated yet.";
+        finalContent += paperTitle;
+        finalContent += `## Final Publication Draft\n\n`;
+        finalContent += paperContent;
+        finalContent += `\n\n---\n\n`;
+
+        // Part 2: The Detailed Project Log
+        finalContent += `## Detailed Project Log\n\nThis section contains the raw inputs and outputs for each step of the research project.\n\n`;
+
+        WORKFLOW_STEPS.forEach(step => {
+            if (step.id < 10) { // We don't need to log step 10 itself
+                const stepData = experiment.stepData[step.id] || {};
+                const stepInput = stepData.input || "N/A";
+                const stepOutput = stepData.output || "N/A";
+
+                finalContent += `### Step ${step.id}: ${step.title}\n\n`;
+                finalContent += `**User Input/Prompt:**\n\`\`\`\n${stepInput}\n\`\`\`\n\n`;
+                finalContent += `**AI-Generated Output:**\n\`\`\`\n${stepOutput}\n\`\`\`\n\n---\n\n`;
+            }
+        });
+
+        // Convert to plain text if needed
+        let contentToDownload = finalContent;
+        if (format === 'text') {
+            contentToDownload = contentToDownload
+                .replace(/`{3,}[\s\S]*?`{3,}/g, (match) => match.replace(/`/g, '')) // Remove code blocks
+                .replace(/#+\s/g, '') // Remove markdown headers
+                .replace(/(\*\*|__)(.*?)\1/g, '$2') // Remove bold
+                .replace(/(\*|_)(.*?)\1/g, '$2'); // Remove italic
         }
 
-        const blob = new Blob([content], { type: `text/${format === 'markdown' ? 'markdown' : 'plain'}` });
+        const blob = new Blob([contentToDownload], { type: `text/${format === 'markdown' ? 'markdown' : 'plain'};charset=utf-8` });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${experiment.title.replace(/\s/g, '_')}.${format === 'markdown' ? 'md' : 'txt'}`;
+        const safeTitle = experiment.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        a.download = `${safeTitle}_publication_and_log.${format === 'markdown' ? 'md' : 'txt'}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -1178,10 +1534,10 @@ const PublicationExporter = ({ experiment, onGenerate, isLoading, output, onSave
                 <>
                     <div className="d-flex justify-content-end flex-wrap gap-2 mb-3">
                          <button className="btn btn-sm btn-outline-light" onClick={() => handleExport('markdown')}>
-                            <i className="bi bi-filetype-md me-1"></i> Export as Markdown
+                            <i className="bi bi-filetype-md me-1"></i> Export Paper & Log (MD)
                         </button>
                          <button className="btn btn-sm btn-outline-light" onClick={() => handleExport('text')}>
-                            <i className="bi bi-file-text me-1"></i> Export as Text
+                            <i className="bi bi-file-text me-1"></i> Export Paper & Log (TXT)
                         </button>
                         <button className="btn btn-sm btn-outline-info" onClick={() => setIsCommentsModalOpen(true)}>
                             <i className="bi bi-chat-right-text me-1"></i> Send Comments

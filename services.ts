@@ -1,12 +1,15 @@
 
 
+
+
 import Dexie from 'dexie';
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
     FineTuneSettings,
     STEP_SPECIFIC_TUNING_PARAMETERS,
-    DATA_ANALYZER_SCHEMA
+    DATA_ANALYZER_SCHEMA,
+    WORKFLOW_STEPS
 } from './config';
 
 // --- DATABASE SETUP (DEXIE) ---
@@ -29,21 +32,56 @@ export const db = new ExperimentDatabase();
 // --- GEMINI API SERVICE ---
 
 let geminiInstance: GoogleGenAI | null = null;
+let currentApiKey: string | null = null; // To track which key is active
 
-export const initializeGemini = (): GoogleGenAI | null => {
-    if (geminiInstance) return geminiInstance;
+export const initializeGemini = (userApiKey?: string): GoogleGenAI | null => {
+    const apiKey = userApiKey || process.env.API_KEY;
+
+    // If we have an instance and the key hasn't changed, return it.
+    if (geminiInstance && currentApiKey === apiKey) {
+        return geminiInstance;
+    }
+
     try {
-        const apiKey = process.env.API_KEY;
         if (!apiKey) {
-            throw new Error("API_KEY environment variable not set.");
+            // This is a valid state if user needs to provide a key, so don't throw an error.
+            // The UI will handle prompting the user for a key.
+            console.warn("API key is not available. Waiting for user input or promo code.");
+            return null;
         }
         geminiInstance = new GoogleGenAI({ apiKey });
+        currentApiKey = apiKey;
         return geminiInstance;
     } catch (error) {
         console.error("Failed to initialize Gemini:", error);
+        geminiInstance = null;
+        currentApiKey = null;
         return null;
     }
 };
+
+/**
+ * @function testApiKey
+ * Performs a simple, low-cost API call to validate if a key is functional.
+ * @param {string} apiKey - The user-provided API key to test.
+ * @returns {Promise<boolean>} True if the key is valid, false otherwise.
+ */
+export const testApiKey = async (apiKey: string): Promise<boolean> => {
+    try {
+        const testGemini = new GoogleGenAI({ apiKey });
+        // A minimal request to check for authentication errors.
+        await testGemini.models.generateContent({
+             model: 'gemini-2.5-flash',
+             contents: 'test',
+             config: { thinkingConfig: { thinkingBudget: 0 } } // Make it as fast and cheap as possible
+        });
+        return true;
+    } catch (error) {
+        console.error("API Key validation failed:", error);
+        return false;
+    }
+};
+
 
 /**
  * @function getStepContext
@@ -56,20 +94,57 @@ export const getStepContext = (experiment: Experiment, stepId: number): object =
     const context: any = { experimentField: experiment.field };
     const data = experiment.stepData || {};
 
+    const getFullStep = (sId) => ({ input: data[sId]?.input || 'N/A', output: data[sId]?.output || 'N/A' });
+
+    // General context available to most steps
     if (stepId > 1) context.question = data[1]?.output || '';
     if (stepId > 2) context.literature_review = data[2]?.output || '';
     if (stepId > 3) context.hypothesis = data[3]?.output || '';
     if (stepId > 4) context.methodology = data[4]?.output || '';
     if (stepId > 5) context.data_collection_plan = data[5]?.output || '';
-    if (stepId > 7) context.analysis_summary = data[7]?.output ? JSON.parse(data[7].output).summary : '';
+
+    let analysisSummary = 'No analysis available.';
+    if (data[7]?.output) {
+        try {
+            // Attempt to parse the summary from the JSON output of step 7
+            analysisSummary = JSON.parse(data[7].output).summary;
+        } catch {
+            // If parsing fails, use the raw output as a fallback.
+            analysisSummary = data[7].output;
+        }
+    }
+    if (stepId > 7) context.analysis_summary = analysisSummary;
     if (stepId > 8) context.conclusion = data[8]?.output || '';
 
-    // Provide all necessary context for later steps
-    if (stepId === 9 || stepId === 10) {
-        context.results = data[7]?.output ? JSON.parse(data[7].output).summary : 'No analysis available.';
+    // Step 8: Conclusion needs specific context from step 1
+    if (stepId === 8) {
+        context.step1_input = data[1]?.input || 'N/A';
     }
+
+    // Step 9: Peer review needs the full log of inputs and outputs from steps 1-8
+    if (stepId === 9) {
+        let projectLog = '';
+        for (let i = 1; i <= 8; i++) {
+            const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
+            if (stepInfo) {
+                const step = getFullStep(i);
+                projectLog += `--- Step ${i}: ${stepInfo.title} ---\n[INPUT]:\n${step.input}\n\n[OUTPUT]:\n${step.output}\n\n`;
+            }
+        }
+        context.full_project_log = projectLog;
+    }
+
+    // Step 10: Publication needs the full log from steps 1-9
     if (stepId === 10) {
-        context.peer_review = data[9]?.output || 'No peer review available.';
+        let projectLog = '';
+        for (let i = 1; i <= 9; i++) {
+            const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
+            if (stepInfo) {
+                const step = getFullStep(i);
+                projectLog += `--- Step ${i}: ${stepInfo.title} ---\n[INPUT FOR STEP ${i}]:\n${step.input}\n\n[OUTPUT FROM STEP ${i}]:\n${step.output}\n\n`;
+            }
+        }
+        context.full_project_log = projectLog;
     }
 
     return context;
@@ -99,7 +174,8 @@ export const getPromptForInputSuggestion = (stepId: number, context: any) => {
             basePrompt = `The current hypothesis is "${context.hypothesis}". Propose a suitable title or brief description for the methodology that will be designed to test it.`;
             break;
         case 7:
-             basePrompt = `The user needs to analyze data from their experiment. The data collection plan was: "${context.data_collection_plan}". Please provide the raw data to be analyzed below.`;
+            // Data for step 7 always comes from step 6, so no suggestion is needed.
+            basePrompt = null;
             break;
         // Steps 2, 5, 8, 9, 10 can be triggered without a specific input suggestion, as they primarily act on previous outputs.
         default:
@@ -177,13 +253,13 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
             config.responseSchema = DATA_ANALYZER_SCHEMA;
             break;
         case 8:
-            basePrompt = `The data analysis results are summarized as: "${context.analysis_summary}". Based on this, draw a conclusion. State whether the hypothesis ("${context.hypothesis}") was supported, and discuss the broader implications and potential limitations of the findings.`;
+            basePrompt = `You are tasked with drawing a conclusion for a scientific experiment. Use the following information:\n\n- **Initial Research Idea:** "${context.step1_input}"\n- **Final Research Question:** "${context.question}"\n- **Data Analysis Summary:** "${context.analysis_summary}"\n- **User's Additional Notes:** "${userInput}"\n\nBased ONLY on the information provided, write a formal conclusion. Your conclusion must directly address the final research question. It must explicitly state whether the hypothesis ("${context.hypothesis}") was supported, rejected, or if the results were inconclusive. You must also discuss the broader implications of the findings and acknowledge potential limitations of the study.`;
             break;
         case 9:
-            basePrompt = `Conduct a critical peer review of the following research project. Be thorough and constructive.\n\n- Research Question: "${context.question}"\n- Hypothesis: "${context.hypothesis}"\n- Methodology: "${context.methodology}"\n- Results Summary: "${context.results}"\n- Conclusion: "${context.conclusion}"`;
+            basePrompt = `You are a peer reviewer. Your task is to conduct a thorough and constructive review of the entire research project provided below. Analyze each step, from the initial question to the final conclusion, based on both the user's input and the AI's output.\n\nYour review should be a summary list of recommended improvements and changes. Focus on clarity, scientific rigor, logical consistency between steps, and the strength of the final conclusion.\n\nHere is the complete project log:\n\n${context.full_project_log}`;
             break;
         case 10:
-            basePrompt = `Assemble the entire research project into a well-structured scientific paper draft using Markdown format. Include sections for Introduction (based on the literature review), Methods, Results (based on the analysis summary), Discussion (based on the conclusion and peer review), and a final Conclusion.\n\n- Research Question: "${context.question}"\n- Literature Review: "${context.literature_review}"\n- Hypothesis: "${context.hypothesis}"\n- Methodology: "${context.methodology}"\n- Results Summary: "${context.results}"\n- Conclusion: "${context.conclusion}"\n- Peer Review Feedback: "${context.peer_review}"`;
+            basePrompt = `You are an expert scientific writer tasked with drafting a publication-ready paper. Your audience consists of experts in the field of **${context.experimentField}**. Use appropriate, professional terminology.\n\nYou must rewrite and synthesize the entire research project log into a cohesive scientific paper in Markdown format. Do not just copy the text; you must rephrase, connect, and structure it professionally. The paper must include the standard sections: Abstract, Introduction, Methods, Results, Discussion, and Conclusion.\n\n**Key instructions:**\n1.  **Rewrite, Don't Copy:** Re-author the content from the project log into a formal academic voice.\n2.  **Incorporate Citations:** When writing the Introduction, you MUST integrate citations from the Literature Review (Step 2). The full text of the literature review is provided in the log.\n3.  **Address Peer Review:** In the Discussion section, you MUST address the points raised in the simulated peer review (Step 9).\n4.  **Structure:** Create a seamless narrative connecting all parts of the research.\n\nHere is the complete project log you must use as your source material:\n\n${context.full_project_log}`;
             break;
         default:
             basePrompt = `An unknown step was requested. Please provide general assistance.`;

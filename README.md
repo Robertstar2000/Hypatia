@@ -17,7 +17,7 @@
 
 ---
 
-### **Note: This is a sophisticated frontend-only application that runs entirely in your browser. All data is securely stored on your local machine using IndexedDB. No backend or sign-up is required.**
+### **Note: This is a sophisticated frontend-only application that runs entirely in your browser. All project data is securely stored on your local machine using IndexedDB. No backend or sign-up is required.**
 
 ---
 
@@ -46,8 +46,8 @@ Project Hypatia is your digital lab partner, an AI-powered platform designed to 
 
 ## Key Features
 
--   ✅ **Local-First Storage**: All experiment data is stored directly in your browser's **IndexedDB via Dexie.js**—no backend, no sign-ups, no data leaves your machine.
--   🗂️ **Experiment Dashboard**: A central hub to create, view, and manage all your research projects.
+-   ✅ **Local-First Storage**: All project data is stored directly in your browser's **IndexedDB via Dexie.js**—no backend, no sign-ups, no data leaves your machine.
+-   🗂️ **Project Dashboard**: A central hub to create, view, and manage all your research projects.
 -   🗺️ **Guided 10-Step Workflow**: A structured path from idea to publication, with each step contextually building upon the previous ones.
 -   ⚙️ **Fine-Tune AI Parameters**: On a per-step basis, adjust AI settings like a peer reviewer's persona, the level of detail in a methodology, or the novelty of a hypothesis.
 -   ✏️ **Editable Outputs**: All AI-generated text can be edited and saved, giving you full control over the research narrative.
@@ -82,7 +82,7 @@ The traditional scientific method is a systematic process for inquiry. Project H
 
 | Scientific Method Stage | Corresponding Hypatia Step(s)                                   | How Hypatia Enhances It                                                                                               |
 | :---------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
-| **Observation/Idea**      | `Dashboard` (Create Experiment)                                 | Provides a structured way to capture and describe your initial idea.                                                  |
+| **Observation/Idea**      | `Dashboard` (Create Research Project)                           | Provides a structured way to capture and describe your initial idea.                                                  |
 | **Research Question**   | **1.** Research Question                                        | AI helps refine a broad idea into a specific, testable question.                                                      |
 | **Background Research** | **2.** Literature Review                                        | Uses **Google Search grounding** for up-to-date, relevant sources and summarizes them with citations to identify gaps in existing knowledge.      |
 | **Hypothesis**          | **3.** Hypothesis Formulation                                   | AI generates multiple, diverse hypotheses based on the literature, which you can then select or refine.               |
@@ -111,9 +111,13 @@ This project is built with modern, accessible web technologies.
 
 To get a local copy up and running, simply follow these steps.
 
-1.  Download the repository files (`index.html`, `index.tsx`, `README.md`, etc.).
-2.  Open the `index.html` file in a modern web browser (like Chrome, Firefox, or Edge).
-3.  That's it! The application will load and be ready to use.
+1.  **Download Files**: Download the repository files (`index.html`, `index.tsx`, `README.md`, etc.).
+2.  **Open in Browser**: Open the `index.html` file in a modern web browser (like Chrome, Firefox, or Edge).
+3.  **Provide API Key**: Upon loading, the application will prompt you for API access. This is required for the AI features to function. You have two options:
+    *   **Use Promo Code**: If you have a valid promo code, you can use the application's built-in Google Gemini API key.
+    *   **Use Your Own API Key**: You can provide your own free Google Gemini API key. You can get one from [Google AI Studio](https://aistudio.google.com/app/apikey).
+    *   *Security Note*: Your personal API key is stored securely in your browser's session and is never sent to any server besides Google's API endpoints.
+4.  **Begin Research**: Once authenticated, you can start creating your first research project!
 
 <br>
 
@@ -121,7 +125,7 @@ To get a local copy up and running, simply follow these steps.
 
 ### 1. The 10-Step Workflow
 
-When you open the app, you start on the landing page and can navigate to the **Dashboard**. From there, you can create a new experiment or select an existing one. This will take you to the main workspace, which guides you through the scientific method. The AI's output at each step informs the next, creating a cohesive research narrative.
+When you open the app, you start on the landing page and can navigate to the **Dashboard**. From there, you can create a new research project or select an existing one. This will take you to the main workspace, which guides you through the scientific method. The AI's output at each step informs the next, creating a cohesive research narrative.
 
 **Full Control**: You have full control over the AI's output.
 -   On any step where text has been generated, you will see an **<i class="bi bi-pencil-square"></i> Edit** button.

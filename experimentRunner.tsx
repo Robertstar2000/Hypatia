@@ -1,38 +1,30 @@
-
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { GoogleGenAI } from '@google/genai';
-import { Experiment } from './config';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useExperiment } from './index.tsx';
 import { useToast } from './toast';
-import { getStepContext } from './services';
-
-interface ExperimentRunnerProps {
-    experiment: Experiment;
-    onExperimentUpdate: (updatedData: Partial<Experiment>, silent?: boolean) => void;
-    onStepComplete: () => void;
-    gemini: GoogleGenAI | null;
-}
+import { getStepContext, parseGeminiError } from './services';
 
 type ExperimentMode = 'simulate' | 'manual' | 'synthesize';
 
-export const ExperimentRunner = ({ experiment, onExperimentUpdate, onStepComplete, gemini }: ExperimentRunnerProps) => {
+export const ExperimentRunner = ({ onStepComplete }) => {
     const [mode, setMode] = useState<ExperimentMode | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const { addToast } = useToast();
+    const { activeExperiment, updateExperiment } = useExperiment();
 
     const handleDataSubmission = (data: string, summary: string) => {
-        const currentStepData = experiment.stepData || {};
+        const currentStepData = activeExperiment.stepData || {};
         const newStepData = {
             ...currentStepData,
-            6: { ...(currentStepData[6] || {}), output: summary },
+            6: { ...(currentStepData[6] || {}), output: summary, summary: summary }, // Use summary for both fields
             7: { ...(currentStepData[7] || {}), input: data }
         };
-        onExperimentUpdate({ stepData: newStepData }, true);
+        const updatedExperiment = { ...activeExperiment, stepData: newStepData };
+        updateExperiment(updatedExperiment);
         addToast("Data submitted successfully! You can now complete this step.", "success");
         onStepComplete();
     };
     
-    const context = useMemo(() => getStepContext(experiment, 6), [experiment]);
+    const context = useMemo(() => getStepContext(activeExperiment, 6), [activeExperiment]);
 
     if (isLoading) {
         return (
@@ -45,9 +37,7 @@ export const ExperimentRunner = ({ experiment, onExperimentUpdate, onStepComplet
     }
     
     if (!mode) {
-        return (
-            <ModeSelection onSelect={setMode} />
-        );
+        return <ModeSelection onSelect={setMode} />;
     }
 
     return (
@@ -55,29 +45,9 @@ export const ExperimentRunner = ({ experiment, onExperimentUpdate, onStepComplet
             <button className="btn btn-sm btn-outline-secondary mb-3" onClick={() => setMode(null)}>
                 <i className="bi bi-arrow-left me-1"></i> Change Data Generation Mode
             </button>
-            {mode === 'simulate' && (
-                <CodeSimulator 
-                    experiment={experiment} 
-                    onExperimentUpdate={onExperimentUpdate} 
-                    onComplete={handleDataSubmission}
-                    gemini={gemini}
-                    context={context}
-                />
-            )}
-            {mode === 'manual' && (
-                <ManualDataEntry 
-                    onComplete={handleDataSubmission}
-                    gemini={gemini}
-                    context={context}
-                />
-            )}
-            {mode === 'synthesize' && (
-                <DataSynthesizer 
-                    onComplete={handleDataSubmission}
-                    gemini={gemini}
-                    context={context}
-                />
-            )}
+            {mode === 'simulate' && <CodeSimulator onComplete={handleDataSubmission} context={context} />}
+            {mode === 'manual' && <ManualDataEntry onComplete={handleDataSubmission} context={context} />}
+            {mode === 'synthesize' && <DataSynthesizer onComplete={handleDataSubmission} context={context} />}
         </div>
     );
 };
@@ -94,7 +64,7 @@ const ModeSelection = ({ onSelect }) => (
                     <div className="card-body d-flex flex-column">
                         <div className="feature-icon"><i className="bi bi-code-slash"></i></div>
                         <h6 className="card-title fw-bold">AI-Generated Simulation</h6>
-                        <p className="card-text small text-white-50 flex-grow-1">Have the AI write a JavaScript simulation based on your methodology. You can then run, debug, and edit the code to generate your dataset.</p>
+                        <p className="card-text small text-white-50 flex-grow-1">Have the AI write a JavaScript simulation based on your methodology. The code runs in a secure sandbox. You can then run, debug, and edit it.</p>
                         <button className="btn btn-primary mt-auto" onClick={() => onSelect('simulate')}>Select Code Simulation</button>
                     </div>
                 </div>
@@ -124,90 +94,123 @@ const ModeSelection = ({ onSelect }) => (
 );
 
 
-const CodeSimulator = ({ experiment, onExperimentUpdate, onComplete, gemini, context }) => {
-    const [code, setCode] = useState(experiment.simulationCode || '');
+const CodeSimulator = ({ onComplete, context }) => {
+    const { activeExperiment, updateExperiment, gemini } = useExperiment();
+    const [code, setCode] = useState(activeExperiment.stepData[6]?.input || '');
     const [isInitializing, setIsInitializing] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
     const [output, setOutput] = useState<{logs: string[], error: string | null}>({ logs: [], error: null });
     const { addToast } = useToast();
+    const workerRef = useRef<Worker | null>(null);
+
+    // Setup and teardown for the Web Worker
+    useEffect(() => {
+        const workerCode = `
+            self.onmessage = (event) => {
+                const { code } = event.data;
+                const logs = [];
+                let finished = false;
+
+                const hypatia = {
+                    finish: (data, summary) => {
+                        if (typeof data !== 'string' || typeof summary !== 'string') {
+                            throw new Error("hypatia.finish() requires two string arguments: data (CSV format) and summary.");
+                        }
+                        self.postMessage({ type: 'log', payload: '✅ Simulation Finished. Data passed to next step.' });
+                        self.postMessage({ type: 'finish', payload: { data, summary } });
+                        finished = true;
+                    }
+                };
+                
+                const consoleProxy = {
+                    log: (...args) => {
+                        const logMsg = args.map(arg => {
+                            try { return JSON.stringify(arg); } catch { return String(arg); }
+                        }).join(' ');
+                        self.postMessage({ type: 'log', payload: logMsg });
+                    }
+                };
+
+                try {
+                    new Function('console', 'hypatia', code)(consoleProxy, hypatia);
+                    if (!finished) {
+                        self.postMessage({ type: 'log', payload: "🔵 Simulation ended without calling hypatia.finish()." });
+                    }
+                    self.postMessage({ type: 'done' });
+                } catch (e) {
+                    self.postMessage({ type: 'error', payload: \`[\${e.name}] \${e.message}\` });
+                }
+            };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        workerRef.current = new Worker(URL.createObjectURL(blob));
+
+        workerRef.current.onmessage = (event) => {
+            const { type, payload } = event.data;
+            if (type === 'log') setOutput(prev => ({ ...prev, logs: [...prev.logs, payload] }));
+            if (type === 'error') setOutput(prev => ({ ...prev, error: payload, logs: [...prev.logs, payload] }));
+            if (type === 'finish') onComplete(payload.data, payload.summary);
+        };
+
+        return () => {
+            if (workerRef.current) {
+                workerRef.current.terminate();
+                workerRef.current = null;
+            }
+        };
+    }, [onComplete]);
+
 
     useEffect(() => {
-        if (!experiment.simulationCode && gemini) {
+        if (!code && gemini) {
             setIsInitializing(true);
-            const prompt = `Based on the following methodology and data collection plan, write a JavaScript simulation. The code must use \`hypatia.finish(csvData, summary)\` to return its results. The data should be in CSV format. Output ONLY the raw JavaScript code without any explanations or markdown backticks.\n\nMethodology:\n${context.methodology}\n\nData Collection Plan:\n${context.data_collection_plan}`;
+            const prompt = `Based on the following methodology and data collection plan, write a JavaScript simulation. The code must use \`hypatia.finish(csvData, summary)\` to return its results. The data should be in CSV format. Output ONLY the raw JavaScript code without any explanations or markdown backticks.\n\nMethodology Summary:\n${context.methodology_summary}\n\nData Collection Plan Summary:\n${context.data_collection_plan_summary}`;
             
             gemini.models.generateContent({model: 'gemini-2.5-flash', contents: prompt})
-                .then(response => {
-                    const generatedCode = response.text.trim();
-                    setCode(generatedCode);
-                    onExperimentUpdate({ simulationCode: generatedCode }, true);
-                })
-                .catch(err => {
-                    console.error("Code generation failed:", err);
-                    addToast("AI failed to generate initial simulation code.", "danger");
-                })
+                .then(response => handleCodeChange(response.text.trim()))
+                .catch(err => addToast(parseGeminiError(err, "AI failed to generate initial simulation code."), "danger"))
                 .finally(() => setIsInitializing(false));
         }
     }, [gemini, context]);
 
     const handleCodeChange = (newCode: string) => {
         setCode(newCode);
-        onExperimentUpdate({ simulationCode: newCode }, true);
+        const updatedStepData = { ...activeExperiment.stepData, 6: { ...activeExperiment.stepData[6], input: newCode }};
+        updateExperiment({ ...activeExperiment, stepData: updatedStepData });
     };
 
     const runCode = () => {
         setOutput({ logs: [], error: null });
-        const logs: string[] = [];
-        let finished = false;
-
-        const hypatia = {
-            finish: (data, summary) => {
-                if (typeof data !== 'string' || typeof summary !== 'string') {
-                    throw new Error("hypatia.finish() requires two string arguments: data (CSV format) and summary.");
-                }
-                logs.push(`✅ Simulation Finished. Data passed to next step.`);
-                onComplete(data, summary);
-                finished = true;
-            }
-        };
-
-        const consoleProxy = { log: (...args) => logs.push(args.map(arg => String(arg)).join(' ')) };
-
-        try {
-            new Function('console', 'hypatia', code)(consoleProxy, hypatia);
-            if (!finished) logs.push("🔵 Simulation ended without calling hypatia.finish().");
-            setOutput({ logs, error: null });
-        } catch (e) {
-            setOutput({ logs, error: `[${e.name}] ${e.message}` });
+        if(workerRef.current) {
+            workerRef.current.postMessage({ code });
         }
     };
     
      const handleAiFixCode = async () => {
         if (!gemini || !output.error) return;
         setIsFixing(true);
-        const prompt = `Fix this JavaScript code. The error was: "${output.error}".\n\nCode:\n${code}\n\nReturn ONLY the corrected code.`;
+        const prompt = `Fix this JavaScript code. The error was: "${output.error}".\n\nCode:\n${code}\n\nReturn ONLY the corrected code, without any explanations or markdown.`;
         try {
             const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
-            const fixedCode = response.text.trim();
-            handleCodeChange(fixedCode);
+            handleCodeChange(response.text.trim());
             addToast("AI suggested a fix.", 'success');
             setOutput(prev => ({ ...prev, error: null }));
-        } catch (err) { addToast("AI fix failed.", 'danger'); } finally { setIsFixing(false); }
+        } catch (err) { addToast(parseGeminiError(err, "AI fix failed."), 'danger'); } finally { setIsFixing(false); }
     };
 
     if(isInitializing) return <div className="text-center p-4"><div className="spinner-border"></div><p className="mt-2">AI is writing your simulation code...</p></div>
 
     return (
         <div>
-            <h6 className="fw-bold">AI-Generated Simulation Code</h6>
+            <h6 className="fw-bold">AI-Generated Simulation Code (Sandboxed)</h6>
             <textarea className="form-control" id="code-editor" value={code} onChange={e => handleCodeChange(e.target.value)} rows={15} />
-            <button className="btn btn-success mt-2" onClick={runCode}><i className="bi bi-play-fill me-1"></i> Run</button>
-            <h6 className="fw-bold mt-3">Output</h6>
+            <button className="btn btn-success mt-2" onClick={runCode}><i className="bi bi-play-fill me-1"></i> Run in Sandbox</button>
+            <h6 className="fw-bold mt-3">Sandbox Output</h6>
             <div className={`code-output ${output.error ? 'error' : ''}`}>
                 {output.logs.map((log, i) => <div key={i}>{'>'} {log}</div>)}
                 {output.error && (
-                    <div className="d-flex justify-content-between align-items-center">
-                        <span className="fw-bold">{output.error}</span>
+                    <div className="d-flex justify-content-between align-items-center mt-2">
+                        <span className="fw-bold text-danger">{output.error}</span>
                         <button className="btn btn-sm btn-warning" onClick={handleAiFixCode} disabled={isFixing}>{isFixing ? 'Fixing...' : 'Auto-Fix with AI'}</button>
                     </div>
                 )}
@@ -216,7 +219,8 @@ const CodeSimulator = ({ experiment, onExperimentUpdate, onComplete, gemini, con
     );
 };
 
-const ManualDataEntry = ({ onComplete, gemini, context }) => {
+const ManualDataEntry = ({ onComplete, context }) => {
+    const { gemini } = useExperiment();
     const [columns, setColumns] = useState<string[]>([]);
     const [rows, setRows] = useState<Record<string, string>[]>([]);
     const [isInitializing, setIsInitializing] = useState(true);
@@ -224,7 +228,7 @@ const ManualDataEntry = ({ onComplete, gemini, context }) => {
 
     useEffect(() => {
         if (gemini) {
-            const prompt = `Based on the data collection plan: "${context.data_collection_plan}", generate a simple JSON object where keys are the column headers (as strings) and values are a suggested data type (e.g., 'number', 'string'). For example: {"time_seconds": "number", "temperature_celsius": "number"}. Output only the raw JSON.`;
+            const prompt = `Based on the data collection plan summary: "${context.data_collection_plan_summary}", generate a simple JSON object where keys are the column headers (as strings) and values are a suggested data type (e.g., 'number', 'string'). For example: {"time_seconds": "number", "temperature_celsius": "number"}. Output only the raw JSON.`;
             gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } })
                 .then(response => {
                     const schema = JSON.parse(response.text);
@@ -233,8 +237,8 @@ const ManualDataEntry = ({ onComplete, gemini, context }) => {
                     setRows([Object.fromEntries(newColumns.map(c => [c, '']))]);
                 })
                 .catch(err => {
-                    addToast("AI failed to create a data entry form.", "danger");
-                    setColumns(['Column 1', 'Column 2']); // Fallback
+                    addToast(parseGeminiError(err, "AI failed to create a data entry form."), "danger");
+                    setColumns(['Column 1', 'Column 2']);
                     setRows([{'Column 1': '', 'Column 2': ''}]);
                 })
                 .finally(() => setIsInitializing(false));
@@ -252,7 +256,7 @@ const ManualDataEntry = ({ onComplete, gemini, context }) => {
 
     const handleSubmit = () => {
         const header = columns.join(',');
-        const body = rows.map(row => columns.map(col => `"${row[col].replace(/"/g, '""')}"`).join(',')).join('\n');
+        const body = rows.map(row => columns.map(col => `"${(row[col] || '').replace(/"/g, '""')}"`).join(',')).join('\n');
         const csvData = `${header}\n${body}`;
         onComplete(csvData, "Manually entered data.");
     };
@@ -264,18 +268,11 @@ const ManualDataEntry = ({ onComplete, gemini, context }) => {
              <h6 className="fw-bold">Manual Data Entry Form</h6>
              <div className="table-responsive">
                 <table className="table table-bordered">
-                    <thead>
-                        <tr>
-                            {columns.map(c => <th key={c}>{c}</th>)}
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
+                    <thead><tr>{columns.map(c => <th key={c}>{c}</th>)}<th>Actions</th></tr></thead>
                     <tbody>
                         {rows.map((row, rowIndex) => (
                             <tr key={rowIndex}>
-                                {columns.map(col => (
-                                    <td key={col}><input type="text" className="form-control" value={row[col]} onChange={e => handleRowChange(rowIndex, col, e.target.value)} /></td>
-                                ))}
+                                {columns.map(col => <td key={col}><input type="text" className="form-control" value={row[col]} onChange={e => handleRowChange(rowIndex, col, e.target.value)} /></td>)}
                                 <td><button className="btn btn-sm btn-outline-danger" onClick={() => removeRow(rowIndex)}><i className="bi bi-trash"></i></button></td>
                             </tr>
                         ))}
@@ -288,7 +285,8 @@ const ManualDataEntry = ({ onComplete, gemini, context }) => {
     );
 };
 
-const DataSynthesizer = ({ onComplete, gemini, context }) => {
+const DataSynthesizer = ({ onComplete, context }) => {
+    const { gemini } = useExperiment();
     const [result, setResult] = useState<{ summary: string, csv: string } | null>(null);
     const [isSynthesizing, setIsSynthesizing] = useState(false);
     const { addToast } = useToast();
@@ -298,7 +296,7 @@ const DataSynthesizer = ({ onComplete, gemini, context }) => {
         setIsSynthesizing(true);
         setResult(null);
 
-        const prompt = `Based on the methodology: "${context.methodology}" and data plan: "${context.data_collection_plan}", generate a plausible, estimated, synthetic dataset in CSV format. Output ONLY the CSV data and a brief, one-sentence summary of what the data represents. Separate the summary and the CSV data with '---'.`;
+        const prompt = `Based on the methodology summary: "${context.methodology_summary}" and data plan summary: "${context.data_collection_plan_summary}", generate a plausible, estimated, synthetic dataset in CSV format. Output ONLY the CSV data and a brief, one-sentence summary of what the data represents. Separate the summary and the CSV data with '---'.`;
         
         try {
             const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
@@ -307,7 +305,7 @@ const DataSynthesizer = ({ onComplete, gemini, context }) => {
             setResult({ summary, csv });
             addToast("AI has generated a synthetic dataset.", "success");
         } catch (err) {
-            addToast("Data synthesis failed. Please try again.", "danger");
+            addToast(parseGeminiError(err, "Data synthesis failed."), "danger");
         } finally {
             setIsSynthesizing(false);
         }

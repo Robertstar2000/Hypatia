@@ -1,10 +1,12 @@
 import { Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 // --- TYPE DEFINITIONS ---
 export interface StepData {
     input?: string;
     suggestedInput?: string;
     output?: string;
+    summary?: string;
     history?: { timestamp: string; output: string }[];
 }
 
@@ -16,14 +18,25 @@ export interface Experiment {
     id: string;
     title: string;
     description: string;
-    field: (typeof SCIENTIFIC_FIELDS)[number];
+    field: string;
     currentStep: number;
     stepData: { [key: number]: StepData };
     fineTuneSettings: { [key: number]: FineTuneSettings };
     createdAt: string;
-    simulationCode?: string;
 }
 
+export interface ExperimentContextType {
+    experiments: Experiment[];
+    activeExperiment: Experiment | null;
+    gemini: GoogleGenAI | null;
+    createNewExperiment: (title: string, description: string, field: string) => Promise<void>;
+    updateExperiment: (updatedExperiment: Experiment) => Promise<void>;
+    deleteExperiment: (id: string) => Promise<void>;
+    selectExperiment: (id: string) => void;
+    setActiveExperiment: React.Dispatch<React.SetStateAction<Experiment | null>>;
+}
+
+// FIX: Add and export ToastContextType, which was missing.
 export interface ToastContextType {
     addToast: (message: string, type?: 'success' | 'danger' | 'warning' | 'info') => void;
 }

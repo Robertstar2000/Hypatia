@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from 'react';
 import { Type } from "@google/genai";
 import { GoogleGenAI } from "@google/genai";
 
@@ -33,7 +34,7 @@ export interface ExperimentContextType {
     updateExperiment: (updatedExperiment: Experiment) => Promise<void>;
     deleteExperiment: (id: string) => Promise<void>;
     selectExperiment: (id: string) => void;
-    setActiveExperiment: React.Dispatch<React.SetStateAction<Experiment | null>>;
+    setActiveExperiment: Dispatch<SetStateAction<Experiment | null>>;
 }
 
 // FIX: Add and export ToastContextType, which was missing.

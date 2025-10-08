@@ -1,4 +1,4 @@
-import Dexie from 'dexie';
+import Dexie, { type Table } from 'dexie';
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -10,14 +10,13 @@ import {
 
 // --- DATABASE SETUP (DEXIE) ---
 class ExperimentDatabase extends Dexie {
-    experiments: Dexie.Table<Experiment, string>;
+    experiments!: Table<Experiment, string>;
 
     constructor() {
         super("ProjectHypatiaDB");
         this.version(2).stores({
             experiments: 'id, title, createdAt'
         });
-        this.experiments = this.table("experiments");
     }
 }
 export const db = new ExperimentDatabase();

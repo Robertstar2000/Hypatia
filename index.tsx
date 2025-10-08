@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
 import { appTests } from './index.test.tsx';
 import { Chart, registerables } from 'chart.js';
-import { mtiLogoBase64 } from './assets';
 import {
     Experiment,
     SCIENTIFIC_FIELDS,
@@ -335,20 +334,6 @@ const LandingPage = ({ setView, onAuthenticate, authSectionRef }) => {
                     <h1 className="display-4 landing-title">Project Hypatia</h1>
                     <p className="lead landing-subtitle mb-4">Project Hypatia is your AI-powered partner in scientific research, guiding you from initial question to the mock publication of a draft scientific paper.</p>
 
-                    <div className="d-flex align-items-center justify-content-center gap-4 my-4">
-                        <img src={mtiLogoBase64} alt="Mars Technology Institute Logo" />
-                        <p className="lead mb-0 text-white-50" style={{maxWidth: '300px', textAlign: 'left'}}>
-                            This application created by{' '}
-                            <span style={{color: '#00f2fe', fontWeight: 'bold'}}>M</span>
-                            <span style={{color: '#ff00ff', fontWeight: 'bold'}}>I</span>
-                            <span style={{color: '#ffff00', fontWeight: 'bold'}}>F</span>
-                            <span style={{color: '#00ff00', fontWeight: 'bold'}}>E</span>
-                            <span style={{color: '#ff8c00', fontWeight: 'bold'}}>C</span>
-                            <span style={{color: '#a64aff', fontWeight: 'bold'}}>O</span>
-                            {' '}a Mars Technology Institute (MTI) affiliate.
-                        </p>
-                    </div>
-
                      <div className="getting-started-fields mx-auto">
                          <form onSubmit={handleStart}>
                              <p className="fw-bold text-light">Start a New Research Project</p>
@@ -662,7 +647,9 @@ const ExperimentWorkspace: React.FC = () => {
     const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
     const [streamingOutput, setStreamingOutput] = useState("");
     const [isFineTuneModalOpen, setFineTuneModalOpen] = useState(false);
-    
+    const [isAutomatedMode, setIsAutomatedMode] = useState(false);
+    const [automationStatus, setAutomationStatus] = useState<'idle' | 'running' | 'error' | 'finished'>('idle');
+
     const { addToast } = useToast();
     
     const latestExperimentRef = useRef(experiment);
@@ -673,10 +660,10 @@ const ExperimentWorkspace: React.FC = () => {
         latestExperimentRef.current = experiment;
     }, [experiment]);
 
-    const handleUpdate = useCallback((updatedData, silent = false) => {
+    const handleUpdate = useCallback(async (updatedData, silent = false) => {
         const updatedExperiment = { ...latestExperimentRef.current, ...updatedData };
         setExperiment(updatedExperiment);
-        updateExperiment(updatedExperiment);
+        await updateExperiment(updatedExperiment);
         if (!silent) {
             addToast("Progress saved!", "success");
         }
@@ -840,7 +827,7 @@ const ExperimentWorkspace: React.FC = () => {
             };
 
             const nextStep = activeStep < WORKFLOW_STEPS.length ? activeStep + 1 : activeStep;
-            const updatedExperiment = handleUpdate({
+            const updatedExperiment = await handleUpdate({
                 stepData: updatedStepData,
                 currentStep: nextStep
             }, true);
@@ -857,6 +844,100 @@ const ExperimentWorkspace: React.FC = () => {
             addToast(parseGeminiError(error, "Could not generate step summary."), "danger");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const runAutomationSequence = useCallback(async () => {
+        if (!gemini) return;
+        setAutomationStatus('running');
+    
+        let currentExperimentState = latestExperimentRef.current;
+        let currentInputForStep = userInput;
+    
+        for (let stepToRun = activeStep; stepToRun <= WORKFLOW_STEPS.length; stepToRun++) {
+            if (stepToRun === 6) { // Special handling for the interactive step
+                addToast("Automation paused. Please complete the interactive Step 6 manually.", 'info');
+                setAutomationStatus('idle');
+                setIsAutomatedMode(false);
+                setIsLoading(false);
+                setActiveStep(6);
+                return;
+            }
+    
+            try {
+                const stepInfo = WORKFLOW_STEPS.find(s => s.id === stepToRun);
+                setActiveStep(stepToRun);
+                setLoadingMessage(`Automating Step ${stepToRun}: ${stepInfo?.title || ''}...`);
+                setIsLoading(true);
+                setStreamingOutput("");
+    
+                // 1. Generate Output for the step
+                const context = getStepContext(currentExperimentState, stepToRun);
+                const fineTuneSettings = currentExperimentState.fineTuneSettings[stepToRun] || {};
+                const { basePrompt, config } = getPromptForStep(stepToRun, stepToRun === activeStep ? currentInputForStep : "", context, fineTuneSettings);
+                
+                const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+                const generatedOutput = response.text;
+                setStreamingOutput(generatedOutput);
+    
+                // 2. Summarize and Complete Step
+                const summaryPrompt = `Concisely summarize the key findings, decisions, or content of the following text in 1-3 sentences. Text to summarize:\n\n---\n\n${generatedOutput}`;
+                const summaryResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: summaryPrompt });
+                const summary = summaryResponse.text;
+    
+                const updatedStepData = {
+                    ...currentExperimentState.stepData,
+                    [stepToRun]: {
+                        ...currentExperimentState.stepData[stepToRun],
+                        input: stepToRun === activeStep ? currentInputForStep : '',
+                        output: generatedOutput,
+                        summary: summary,
+                    }
+                };
+                const nextStepInWorkflow = stepToRun < WORKFLOW_STEPS.length ? stepToRun + 1 : stepToRun;
+    
+                // Update local state for the next loop iteration
+                currentExperimentState = { ...currentExperimentState, stepData: updatedStepData, currentStep: nextStepInWorkflow };
+                
+                // Persist to DB and update global state
+                await updateExperiment(currentExperimentState);
+                latestExperimentRef.current = currentExperimentState;
+                setExperiment(currentExperimentState);
+    
+                addToast(`Step ${stepToRun} automated successfully.`, 'info');
+                await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause for UI
+    
+            } catch (error) {
+                addToast(parseGeminiError(error, `Automation failed at Step ${stepToRun}.`), 'danger');
+                setAutomationStatus('error');
+                setIsLoading(false);
+                setIsAutomatedMode(false);
+                return;
+            }
+        }
+    
+        setAutomationStatus('finished');
+        setIsLoading(false);
+        addToast('Automated document generation complete!', 'success');
+        setActiveStep(WORKFLOW_STEPS.length);
+    }, [gemini, activeStep, userInput, updateExperiment, addToast]);
+    
+    useEffect(() => {
+        if (isAutomatedMode && automationStatus === 'idle' && experiment.currentStep > 1) {
+            runAutomationSequence();
+        }
+    }, [isAutomatedMode, automationStatus, experiment.currentStep, runAutomationSequence]);
+    
+    const handleAutomationToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const isEnabled = e.target.checked;
+        if (isEnabled) {
+            if (window.confirm("This will automatically generate and complete all remaining steps. This action cannot be stopped once started. Do you want to proceed?")) {
+                setIsAutomatedMode(true);
+                setAutomationStatus('idle');
+            }
+        } else {
+            setIsAutomatedMode(false);
+            setAutomationStatus('idle'); // Reset status if toggled off
         }
     };
 
@@ -887,6 +968,7 @@ const ExperimentWorkspace: React.FC = () => {
     const currentStepInfo = WORKFLOW_STEPS.find(s => s.id === activeStep);
     const output = streamingOutput || experiment.stepData[activeStep]?.output;
     const isStepCompleted = experiment.currentStep > activeStep;
+    const isAutomationRunning = automationStatus === 'running';
 
     if (!experiment) return <div>Loading experiment...</div>;
 
@@ -901,7 +983,7 @@ const ExperimentWorkspace: React.FC = () => {
                                 key={step.id}
                                 href="#"
                                 className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center ${activeStep === step.id ? 'active' : ''} ${step.id > experiment.currentStep ? 'disabled' : ''}`}
-                                onClick={(e) => { e.preventDefault(); if (step.id <= experiment.currentStep) setActiveStep(step.id); }}
+                                onClick={(e) => { e.preventDefault(); if (step.id <= experiment.currentStep && !isAutomationRunning) setActiveStep(step.id); }}
                             >
                                 <span><i className={`bi ${step.icon} me-2`}></i>{step.title}</span>
                                 {experiment.currentStep > step.id && <i className="bi bi-check-circle-fill text-success"></i>}
@@ -913,14 +995,31 @@ const ExperimentWorkspace: React.FC = () => {
 
             <div className="col-lg-9">
                 <div className="card">
-                    <div className="card-header d-flex justify-content-between align-items-center">
-                         <h4 className="mb-0"><i className={`bi ${currentStepInfo.icon} me-2`}></i> Step {activeStep}: {currentStepInfo.title}</h4>
+                    <div className="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                         <h4 className="mb-0 me-auto"><i className={`bi ${currentStepInfo.icon} me-2`}></i> Step {activeStep}: {currentStepInfo.title}</h4>
+                         
+                         {experiment.currentStep > 1 && !isStepCompleted && (
+                            <div className="form-check form-switch d-flex align-items-center gap-2 border border-secondary rounded-pill px-2 py-1">
+                                <label className="form-check-label small" htmlFor="automationSwitch" style={{cursor: 'pointer'}}>HMAP</label>
+                                <input 
+                                    className="form-check-input" 
+                                    type="checkbox" 
+                                    role="switch" 
+                                    id="automationSwitch"
+                                    checked={isAutomatedMode}
+                                    onChange={handleAutomationToggle}
+                                    disabled={isAutomationRunning}
+                                />
+                                <label className="form-check-label small" htmlFor="automationSwitch" style={{cursor: 'pointer'}}>Automated</label>
+                            </div>
+                         )}
+
                          <div className="d-flex gap-2">
-                            <button className="btn btn-sm btn-outline-secondary" onClick={handleDownloadStep}>
-                                <i className="bi bi-download me-1"></i> Download Step
+                            <button className="btn btn-sm btn-outline-secondary" onClick={handleDownloadStep} disabled={isAutomationRunning}>
+                                <i className="bi bi-download me-1"></i> Download
                             </button>
-                            <button className="btn btn-sm btn-outline-light" onClick={() => setFineTuneModalOpen(true)}>
-                                <i className="bi bi-sliders me-1"></i> Fine-Tune AI
+                            <button className="btn btn-sm btn-outline-light" onClick={() => setFineTuneModalOpen(true)} disabled={isAutomationRunning}>
+                                <i className="bi bi-sliders me-1"></i> Fine-Tune
                             </button>
                         </div>
                     </div>
@@ -948,7 +1047,7 @@ const ExperimentWorkspace: React.FC = () => {
                                         value={userInput}
                                         onChange={(e) => setUserInput(e.target.value)}
                                         placeholder={isLoadingSuggestion ? "AI is suggesting an initial input..." : (isStepCompleted ? "This step is completed. Input is locked." : "Enter your notes, data, or prompt for this step...")}
-                                        disabled={isStepCompleted || isLoading || isLoadingSuggestion}
+                                        disabled={isStepCompleted || isLoading || isLoadingSuggestion || isAutomationRunning}
                                     />
                                 </div>
 
@@ -956,7 +1055,7 @@ const ExperimentWorkspace: React.FC = () => {
                                      <button
                                         className="btn btn-primary"
                                         onClick={handleGenerate}
-                                        disabled={isLoading || isLoadingSuggestion || isStepCompleted}
+                                        disabled={isLoading || isLoadingSuggestion || isStepCompleted || isAutomationRunning}
                                     >
                                         {isLoading ? (
                                             <>
@@ -971,7 +1070,7 @@ const ExperimentWorkspace: React.FC = () => {
                                         <button
                                             className="btn btn-success ms-2"
                                             onClick={handleCompleteStep}
-                                            disabled={!output || isLoading || isLoadingSuggestion}
+                                            disabled={!output || isLoading || isLoadingSuggestion || isAutomationRunning}
                                         >
                                             <i className="bi bi-check-circle-fill me-2"></i>
                                             Complete Step & Continue
@@ -985,7 +1084,7 @@ const ExperimentWorkspace: React.FC = () => {
                         <div className="card-footer">
                             <h5 className="fw-bold">AI Output</h5>
                             {isLoading && !streamingOutput && <div className="d-flex justify-content-center p-5"><div className="spinner-border" role="status"><span className="visually-hidden">Loading...</span></div></div>}
-                            {output && <GeneratedOutput output={output} stepId={activeStep} onSave={handleSaveOutput} isEditable={!isLoading && !isStepCompleted} />}
+                            {output && <GeneratedOutput output={output} stepId={activeStep} onSave={handleSaveOutput} isEditable={!isLoading && !isStepCompleted && !isAutomationRunning} />}
                         </div>
                     )}
                 </div>

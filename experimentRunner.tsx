@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useExperiment } from './index.tsx';
 import { useToast } from './toast';
-import { getStepContext, parseGeminiError } from './services';
+import { parseGeminiError } from './be_gemini';
 
-type ExperimentMode = 'simulate' | 'manual' | 'synthesize';
+type ExperimentMode = 'simulate' | 'manual' | 'synthesize' | 'upload';
 
 export const ExperimentRunner = ({ onStepComplete }) => {
     const [mode, setMode] = useState<ExperimentMode | null>(null);
@@ -15,7 +15,7 @@ export const ExperimentRunner = ({ onStepComplete }) => {
         const currentStepData = activeExperiment.stepData || {};
         const newStepData = {
             ...currentStepData,
-            6: { ...(currentStepData[6] || {}), output: summary, summary: summary }, // Use summary for both fields
+            6: { ...(currentStepData[6] || {}), output: summary, summary: summary, input: data },
             7: { ...(currentStepData[7] || {}), input: data }
         };
         const updatedExperiment = { ...activeExperiment, stepData: newStepData };
@@ -24,7 +24,20 @@ export const ExperimentRunner = ({ onStepComplete }) => {
         onStepComplete();
     };
     
-    const context = useMemo(() => getStepContext(activeExperiment, 6), [activeExperiment]);
+    const context = useMemo(() => {
+        if (!activeExperiment) return {};
+        // Manually import getStepContext to avoid circular dependency
+        const getStepContext = (experiment, stepId) => {
+            const tempContext: any = { experimentField: experiment.field };
+            const data = experiment.stepData || {};
+            const getStepSummary = (sId) => data[sId]?.summary || data[sId]?.output || 'N/A';
+            const getFullOutput = (sId) => data[sId]?.output || 'N/A';
+            if (stepId > 4) tempContext.methodology_summary = getStepSummary(4);
+            if (stepId > 5) tempContext.data_collection_plan_summary = getStepSummary(5);
+            return tempContext;
+        };
+        return getStepContext(activeExperiment, 6)
+    }, [activeExperiment]);
 
     if (isLoading) {
         return (
@@ -48,6 +61,7 @@ export const ExperimentRunner = ({ onStepComplete }) => {
             {mode === 'simulate' && <CodeSimulator onComplete={handleDataSubmission} context={context} />}
             {mode === 'manual' && <ManualDataEntry onComplete={handleDataSubmission} context={context} />}
             {mode === 'synthesize' && <DataSynthesizer onComplete={handleDataSubmission} context={context} />}
+            {mode === 'upload' && <DataUploader onComplete={handleDataSubmission} />}
         </div>
     );
 };
@@ -59,32 +73,42 @@ const ModeSelection = ({ onSelect }) => (
             <p className="text-white-50">Select one of the following methods to provide data for your experiment.</p>
         </div>
         <div className="row g-3">
-            <div className="col-md-4">
+             <div className="col-md-6 col-lg-3">
+                <div className="card h-100 feature-card p-0">
+                    <div className="card-body d-flex flex-column">
+                        <div className="feature-icon"><i className="bi bi-upload"></i></div>
+                        <h6 className="card-title fw-bold">Upload Your Data</h6>
+                        <p className="card-text small text-white-50 flex-grow-1">Upload an existing dataset from your computer. The application will use this data for the analysis step.</p>
+                        <button className="btn btn-primary mt-auto" onClick={() => onSelect('upload')}>Select Upload Data</button>
+                    </div>
+                </div>
+            </div>
+            <div className="col-md-6 col-lg-3">
                 <div className="card h-100 feature-card p-0">
                     <div className="card-body d-flex flex-column">
                         <div className="feature-icon"><i className="bi bi-code-slash"></i></div>
                         <h6 className="card-title fw-bold">AI-Generated Simulation</h6>
-                        <p className="card-text small text-white-50 flex-grow-1">Have the AI write a JavaScript simulation based on your methodology. The code runs in a secure sandbox. You can then run, debug, and edit it.</p>
+                        <p className="card-text small text-white-50 flex-grow-1">Have the AI write a JavaScript simulation based on your methodology. You can then run, debug, and edit it.</p>
                         <button className="btn btn-primary mt-auto" onClick={() => onSelect('simulate')}>Select Code Simulation</button>
                     </div>
                 </div>
             </div>
-            <div className="col-md-4">
+            <div className="col-md-6 col-lg-3">
                  <div className="card h-100 feature-card p-0">
                     <div className="card-body d-flex flex-column">
                         <div className="feature-icon"><i className="bi bi-table"></i></div>
                         <h6 className="card-title fw-bold">Manual Data Entry</h6>
-                        <p className="card-text small text-white-50 flex-grow-1">The AI will create a data entry form based on your data collection plan. You can then manually input your results row by row.</p>
+                        <p className="card-text small text-white-50 flex-grow-1">The AI will create a data entry form based on your plan. You can then manually input your results row by row.</p>
                         <button className="btn btn-primary mt-auto" onClick={() => onSelect('manual')}>Select Manual Entry</button>
                     </div>
                 </div>
             </div>
-            <div className="col-md-4">
+            <div className="col-md-6 col-lg-3">
                  <div className="card h-100 feature-card p-0">
                      <div className="card-body d-flex flex-column">
                         <div className="feature-icon"><i className="bi bi-magic"></i></div>
                         <h6 className="card-title fw-bold">AI Data Synthesis</h6>
-                        <p className="card-text small text-white-50 flex-grow-1">Let the AI estimate and generate a complete, plausible dataset based on your experiment's context. Ideal for theoretical exploration.</p>
+                        <p className="card-text small text-white-50 flex-grow-1">Let the AI generate a plausible dataset based on your experiment's context. Ideal for theoretical exploration.</p>
                         <button className="btn btn-primary mt-auto" onClick={() => onSelect('synthesize')}>Select AI Synthesis</button>
                     </div>
                 </div>
@@ -92,6 +116,61 @@ const ModeSelection = ({ onSelect }) => (
         </div>
     </div>
 );
+
+const DataUploader = ({ onComplete }) => {
+    const [file, setFile] = useState<File | null>(null);
+    const [fileContent, setFileContent] = useState('');
+    const { addToast } = useToast();
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = e.target.files?.[0];
+        if (selectedFile) {
+            if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
+                setFile(selectedFile);
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const content = event.target?.result as string;
+                    setFileContent(content);
+                };
+                reader.onerror = () => {
+                    addToast('Error reading file.', 'danger');
+                };
+                reader.readAsText(selectedFile);
+            } else {
+                addToast('Please upload a valid .csv file.', 'warning');
+                e.target.value = ''; // Reset file input
+            }
+        }
+    };
+
+    const handleSubmit = () => {
+        if (!file || !fileContent) {
+            addToast('Please select a file to upload.', 'warning');
+            return;
+        }
+        const summary = `Data uploaded from file: ${file.name}`;
+        onComplete(fileContent, summary);
+    };
+
+    return (
+        <div>
+            <h6 className="fw-bold">Upload Your Dataset</h6>
+            <p className="text-white-50 small">Please select a CSV file from your computer.</p>
+            <div className="mb-3">
+                <input type="file" className="form-control" accept=".csv" onChange={handleFileChange} />
+            </div>
+            {fileContent && (
+                <div className="mb-3">
+                    <label className="form-label small">File Preview:</label>
+                    <textarea className="form-control" readOnly rows={8} value={fileContent} />
+                </div>
+            )}
+            <button className="btn btn-success" onClick={handleSubmit} disabled={!fileContent}>
+                <i className="bi bi-check-circle-fill me-1"></i> Submit Uploaded Data
+            </button>
+        </div>
+    );
+};
 
 
 const CodeSimulator = ({ onComplete, context }) => {

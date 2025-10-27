@@ -8,7 +8,10 @@ export interface StepData {
     suggestedInput?: string;
     output?: string;
     summary?: string;
-    history?: { timestamp: string; output: string }[];
+    history?: { timestamp: string; input: string; output: string }[];
+    provenance?: { timestamp: string; prompt: string; config: object, output?: string }[];
+    uniquenessScore?: number;
+    uniquenessJustification?: string;
 }
 
 export interface FineTuneSettings {
@@ -24,6 +27,9 @@ export interface Experiment {
     stepData: { [key: number]: StepData };
     fineTuneSettings: { [key: number]: FineTuneSettings };
     createdAt: string;
+    labNotebook?: string;
+    automationMode: 'manual' | 'automated' | null;
+    status?: 'active' | 'archived';
 }
 
 export interface ExperimentContextType {
@@ -35,6 +41,7 @@ export interface ExperimentContextType {
     deleteExperiment: (id: string) => Promise<void>;
     selectExperiment: (id: string) => void;
     setActiveExperiment: Dispatch<SetStateAction<Experiment | null>>;
+    importExperiment: (experimentData: Experiment) => Promise<void>;
 }
 
 // FIX: Add and export ToastContextType, which was missing.
@@ -121,6 +128,82 @@ export const STEP_SPECIFIC_TUNING_PARAMETERS = {
         { name: 'keywords', label: 'Generate Keywords', description: 'Generate a list of 5-7 relevant keywords for indexing.', type: 'boolean', default: true }
     ]
 };
+
+/**
+ * @const RESEARCH_QUESTION_SCHEMA
+ * New schema for Step 1 to enforce a structured response containing the question and uniqueness score.
+ */
+export const RESEARCH_QUESTION_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        research_question: {
+            type: Type.STRING,
+            description: "The final, refined research question."
+        },
+        uniqueness_score: {
+            type: Type.NUMBER,
+            description: "A score from 0.0 to 1.0 indicating the novelty of the research question."
+        },
+        justification: {
+            type: Type.STRING,
+            description: "A brief justification for the assigned uniqueness score."
+        }
+    },
+    required: ["research_question", "uniqueness_score", "justification"]
+};
+
+
+/**
+ * @const LITERATURE_REVIEW_SCHEMA
+ * New schema for Step 2 to enforce structured reference data alongside the summary.
+ */
+export const LITERATURE_REVIEW_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        summary: {
+            type: Type.STRING,
+            description: "A comprehensive summary of the literature review in Markdown format."
+        },
+        references: {
+            type: Type.ARRAY,
+            description: "An array of structured reference objects.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING },
+                    authors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    year: { type: Type.NUMBER },
+                    journal: { type: Type.STRING, description: "Journal, conference, or publisher name." },
+                    url: { type: Type.STRING, description: "A direct URL to the source if available." }
+                },
+                required: ["title", "authors", "year"]
+            }
+        }
+    }
+};
+
+/**
+ * @const STATISTICAL_METHODS_SCHEMA
+ * New schema for the first stage of Step 7, where the AI suggests analysis methods.
+ */
+export const STATISTICAL_METHODS_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        methods: {
+            type: Type.ARRAY,
+            description: "An array of suggested statistical methods.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING, description: "The name of the statistical method (e.g., 'T-Test', 'Linear Regression')." },
+                    description: { type: Type.STRING, description: "A brief explanation of what the method is used for." }
+                },
+                required: ["name", "description"]
+            }
+        }
+    }
+};
+
 
 /**
  * @const DATA_ANALYZER_SCHEMA

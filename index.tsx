@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -455,7 +456,7 @@ const LandingPage = ({ setView, onAuthenticate }) => {
                             <div className="feature-card h-100">
                                 <div className="feature-icon"><i className="bi bi-beaker"></i></div>
                                 <h5>Virtual Experiments</h5>
-                                <p>Run custom JavaScript simulations, upload your own data, or let the AI synthesize plausible results for you.</p>
+                                <p>A versatile virtual lab: upload existing data, run AI-generated simulations, use external tools like Google Colab, or let the AI synthesize plausible results for you.</p>
                             </div>
                         </div>
                          <div className="col-md-4">
@@ -902,9 +903,16 @@ const LabNotebook = ({ isOpen, onClose }) => {
     const [content, setContent] = useState(activeExperiment?.labNotebook || '');
     const { addToast } = useToast();
 
+    const colabTemplate = `\n\n### Google Colab Experiment Notes\n\n*   **Colab Notebook Link:** [https://colab.research.google.com/](https://colab.research.google.com/)\n*   **Anvil Uplink Key:** \`PASTE_YOUR_KEY_HERE\`\n*   **Setup Instructions:**\n    1.  In your Anvil web app, enable the "Server Uplink" service to get an Uplink key.\n    2.  In your Colab notebook, install the anvil-uplink library: \`!pip install anvil-uplink\`.\n    3.  Connect your notebook to Anvil: \`import anvil.server; anvil.server.connect("YOUR_UPLINK_KEY")\`.\n    4.  You can now call functions defined in your Colab notebook from your Anvil web app.\n\n---\n\n`;
+
     useEffect(() => {
         setContent(activeExperiment?.labNotebook || '');
     }, [activeExperiment?.labNotebook, isOpen]);
+
+    const handleInsertTemplate = () => {
+        setContent(prev => prev + colabTemplate);
+        addToast("Colab template added.", "info");
+    };
 
     const handleSave = () => {
         if (activeExperiment) {
@@ -919,6 +927,9 @@ const LabNotebook = ({ isOpen, onClose }) => {
             <div className="lab-notebook-header d-flex justify-content-between align-items-center">
                 <h5 className="mb-0"><i className="bi bi-journal-bookmark-fill me-2"></i>Lab Notebook</h5>
                 <div>
+                    <button className="btn btn-outline-info btn-sm me-2" onClick={handleInsertTemplate} title="Insert Google Colab connection template">
+                        <i className="bi bi-google me-1"></i> Colab Template
+                    </button>
                     <button className="btn btn-primary btn-sm me-2" onClick={handleSave}>Save & Close</button>
                     <button className="btn btn-secondary btn-sm" onClick={onClose}><i className="bi bi-x-lg"></i></button>
                 </div>

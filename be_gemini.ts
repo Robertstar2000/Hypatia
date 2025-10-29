@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -84,7 +85,7 @@ export const getStepContext = (experiment: Experiment, stepId: number): object =
     if (stepId > 3) context.hypothesis = getFullOutput(3); // Hypothesis is usually short, keep full
     if (stepId > 4) context.methodology_summary = getStepSummary(4);
     if (stepId > 5) context.data_collection_plan_summary = getStepSummary(5);
-    if (stepId > 6) context.experiment_data_csv = getFullOutput(6)?.slice(0, 1000); // Send a preview of the data
+    if (stepId > 6) context.experiment_data_csv = data[6]?.input?.slice(0, 2000); // Send a preview of the data
     if (stepId > 7) context.analysis_summary = getStepSummary(7);
     if (stepId > 8) context.conclusion_summary = getStepSummary(8);
 
@@ -95,7 +96,10 @@ export const getStepContext = (experiment: Experiment, stepId: number): object =
         for (let i = 1; i < Math.min(stepId, 10); i++) { // Only loop through the 10 main steps
             const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
             if (stepInfo) {
-                const output = (stepId - i <= 2) ? getFullOutput(i) : getStepSummary(i);
+                let output = (stepId - i <= 2) ? getFullOutput(i) : getStepSummary(i);
+                if (i === 7 && data[7]?.output) {
+                     output += "\n[Note: Data visualizations were generated during this step.]";
+                }
                 projectLog += `--- Summary of Step ${i}: ${stepInfo.title} ---\n${output}\n\n`;
             }
         }
@@ -194,15 +198,16 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
         case 7: // Data Analyzer
             expectJson = true;
             config.responseMimeType = "application/json";
-            config.responseSchema = DATA_ANALYZER_SCHEMA;
             
-            if (settings.isAutomated) {
+            if (settings.isAutomated) { // Automated mode: one-shot analysis
+                 config.responseSchema = DATA_ANALYZER_SCHEMA;
                 basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration in the specified JSON format that conforms to the required schema. Your output must be ONLY the raw JSON object.`;
-            } else if (settings.analysisStage === 'suggest_methods') {
-                basePrompt += `Based on the data collection plan: "${context.data_collection_plan_summary}" and a preview of the data (first few rows): \n\`\`\`\n${context.experiment_data_csv}\n\`\`\`\nSuggest 3 to 5 appropriate statistical analysis methods. For each method, provide a brief description of what it's used for.`;
+            } else if (settings.analysisStage === 'suggest_methods') { // Manual mode, stage 1
                 config.responseSchema = STATISTICAL_METHODS_SCHEMA;
-            } else {
-                basePrompt += `The user has selected the '${settings.selectedMethod || 'default'}' analysis method. Analyze the following data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration in the specified JSON format.`;
+                basePrompt += `Based on the data collection plan: "${context.data_collection_plan_summary}" and a preview of the data (first few rows): \n\`\`\`\n${context.experiment_data_csv}\n\`\`\`\nSuggest 3 to 5 appropriate statistical analysis methods. For each method, provide a brief description of what it's used for. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
+            } else { // Manual mode, stage 2
+                config.responseSchema = DATA_ANALYZER_SCHEMA;
+                basePrompt += `The user has selected the '${settings.selectedMethod || 'default'}' analysis method. Analyze the following data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration in the specified JSON format. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
             }
             break;
         case 8:
@@ -212,7 +217,7 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
             basePrompt += `You are a peer reviewer. Your task is to conduct a thorough and constructive review of the entire research project, summarized below. Analyze the project for clarity, scientific rigor, logical consistency between steps, and the strength of the final conclusion.\n\nHere is the summarized project log:\n\n${context.full_project_summary_log}`;
             break;
         case 10:
-            basePrompt += `You are an expert scientific writer tasked with drafting a publication-ready paper for an audience of experts in **${context.experimentField}**. Use appropriate, professional terminology.\n\nYou must rewrite and synthesize the entire research project log into a cohesive scientific paper in Markdown format. Do not just copy the text; you must rephrase, connect, and structure it professionally. The paper must include the standard sections: Abstract, Introduction, Methods, Results, Discussion, and Conclusion.\n\n**Key instructions:**\n1.  **Rewrite, Don't Copy:** Re-author the content from the project log into a formal academic voice.\n2.  **Incorporate Context:** When writing, you MUST integrate context from the entire project log provided.\n3.  **Address Peer Review:** In the Discussion section, you MUST address the points raised in the simulated peer review.\n\nHere is the summarized project log you must use as your source material:\n\n${context.full_project_summary_log}`;
+            basePrompt += `You are an expert scientific writer tasked with drafting a publication-ready paper for an audience of experts in **${context.experimentField}**. Use appropriate, professional terminology.\n\nYou must rewrite and synthesize the entire research project log into a cohesive scientific paper in Markdown format. The paper must include the standard sections: Abstract, Introduction, Methods, Results, Discussion, and Conclusion.\n\n**Key instructions:**\n1.  **Rewrite, Don't Copy:** Re-author the content from the project log into a formal academic voice.\n2.  **Incorporate Context:** When writing, you MUST integrate context from the entire project log provided.\n3.  **Placeholders for Charts:** In the 'Results' section, where appropriate, you MUST insert placeholders for data visualizations. Use the format [CHART_1: A descriptive caption], [CHART_2: Another caption], etc. Refer to the data analysis summary to create relevant captions.\n4.  **Address Peer Review:** In the Discussion section, you MUST address the points raised in the simulated peer review.\n\nHere is the summarized project log you must use as your source material:\n\n${context.full_project_summary_log}`;
             break;
         case 11: // Virtual step for Submission Checklist
              basePrompt += `Based on the following research project summary log, generate a comprehensive pre-submission checklist for a high-impact journal in the field of ${context.experimentField}. The checklist should be in Markdown format and cover key areas like formatting, authorship, data availability statements, conflict of interest declarations, and ethical considerations.\n\nProject Log:\n${context.full_project_summary_log}`;

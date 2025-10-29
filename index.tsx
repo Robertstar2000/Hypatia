@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -1377,10 +1378,11 @@ const ExperimentWorkspace = () => {
                 {/* Specific UI for certain steps */}
                 {activeStep === 1 && <EditableStepInput stepId={1} />}
                 {activeStep === 6 && <ExperimentRunner onStepComplete={handleCompleteStep} />}
+                {activeStep === 7 && <DataAnalysisWorkspace onStepComplete={handleCompleteStep} />}
                 {activeStep === 10 && <PublicationExporter />}
 
                 {/* Default UI for text-based steps */}
-                {activeStep !== 6 && activeStep !== 10 && (
+                {activeStep !== 6 && activeStep !== 7 && activeStep !== 10 && (
                     <GeneratedOutput
                         key={activeExperiment.id + '-' + activeStep} // Force re-render on step change
                         stepId={activeStep}
@@ -1424,7 +1426,7 @@ const ExperimentWorkspace = () => {
                         )}
                         {renderStepContent()}
                     </div>
-                    {activeStep <= WORKFLOW_STEPS.length && activeExperiment.automationMode !== 'automated' && !isAutoGenerating && activeStep !== 10 && (
+                    {activeStep <= WORKFLOW_STEPS.length && activeExperiment.automationMode !== 'automated' && !isAutoGenerating && activeStep !== 10 && activeStep !== 6 && activeStep !== 7 && (
                          <div className="card-footer d-flex justify-content-between align-items-center bottom-nav">
                              <div>
                                 <button className="btn btn-secondary me-2" onClick={() => setFineTuneModalOpen(true)}>
@@ -1434,7 +1436,7 @@ const ExperimentWorkspace = () => {
                              <button 
                                 className="btn btn-success" 
                                 onClick={handleCompleteStep} 
-                                disabled={isLoading || !stepData?.output || activeStep === 6}>
+                                disabled={isLoading || !stepData?.output}>
                                  <i className="bi bi-check-circle-fill me-1"></i> Complete Step & Continue
                              </button>
                          </div>
@@ -1446,6 +1448,130 @@ const ExperimentWorkspace = () => {
                     stepId={activeStep}
                     onClose={() => setFineTuneModalOpen(false)}
                 />
+            )}
+        </div>
+    );
+};
+
+const DataAnalysisWorkspace = ({ onStepComplete }) => {
+    const { activeExperiment, updateExperiment, gemini, setActiveExperiment } = useExperiment();
+    const { addToast } = useToast();
+    const [analysisStage, setAnalysisStage] = useState<'init' | 'suggest' | 'analyze' | 'complete'>('init');
+    const [suggestedMethods, setSuggestedMethods] = useState<{name: string, description: string}[]>([]);
+    const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    
+    const stepData = activeExperiment.stepData[7] || {};
+
+    useEffect(() => {
+        if (stepData.output) {
+            setAnalysisStage('complete');
+        } else if (activeExperiment.automationMode === 'automated') {
+            handlePerformAnalysis(null, { isAutomated: true });
+        } else {
+            setAnalysisStage('suggest');
+            if (suggestedMethods.length === 0) {
+                handleSuggestMethods();
+            }
+        }
+    }, [activeExperiment.automationMode]);
+
+    const handleSuggestMethods = async () => {
+        setIsLoading(true);
+        try {
+            const context = getStepContext(activeExperiment, 7);
+            const { basePrompt, config } = getPromptForStep(7, '', context, { analysisStage: 'suggest_methods' });
+            const response = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: basePrompt, config});
+            const sanitizedText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(sanitizedText);
+            setSuggestedMethods(parsed.methods);
+        } catch (error) {
+            addToast(parseGeminiError(error, "Failed to suggest analysis methods."), 'danger');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    // FIX: Explicitly type extraSettings to allow for the 'isAutomated' property.
+    const handlePerformAnalysis = async (method: string | null, extraSettings: { isAutomated?: boolean } = {}) => {
+        setSelectedMethod(method);
+        setIsLoading(true);
+        setAnalysisStage('analyze');
+        
+        let currentOutput = '';
+        try {
+            const context = getStepContext(activeExperiment, 7);
+            const fineTuneSettings = { 
+                ...activeExperiment.fineTuneSettings[7], 
+                selectedMethod: method,
+                ...extraSettings 
+            };
+            const { basePrompt, config } = getPromptForStep(7, stepData.input || '', context, fineTuneSettings);
+            
+            const stream = await gemini.models.generateContentStream({model: 'gemini-2.5-flash', contents: basePrompt, config});
+            
+            let buffer = '';
+            for await (const chunk of stream) {
+                buffer += chunk.text;
+                // Live update for display without saving to DB yet
+                setActiveExperiment(exp => ({...exp, stepData: {...exp.stepData, 7: {...exp.stepData[7], output: buffer}}}));
+            }
+            currentOutput = buffer;
+
+        } catch (error) {
+            currentOutput = `Error: ${parseGeminiError(error)}`;
+            addToast(parseGeminiError(error), 'danger');
+        } finally {
+             const finalStepData = { ...stepData, output: currentOutput };
+             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+             setIsLoading(false);
+             setAnalysisStage('complete');
+             // If this was an automated run, we need to call onStepComplete
+             if (extraSettings.isAutomated) {
+                onStepComplete();
+             }
+        }
+    };
+
+    if (isLoading && analysisStage !== 'analyze') {
+        return <div className="text-center p-4"><div className="spinner-border"></div><p className="mt-2">AI is working...</p></div>;
+    }
+
+    if (analysisStage === 'suggest') {
+        return (
+            <div>
+                <h5 className="fw-bold">Suggest Analysis Methods</h5>
+                <p className="text-white-50">Based on your data, the AI suggests the following methods. Please select one to proceed.</p>
+                <div className="list-group">
+                    {suggestedMethods.map((method, index) => (
+                        <button key={index} type="button" className="list-group-item list-group-item-action" onClick={() => handlePerformAnalysis(method.name)}>
+                            <div className="d-flex w-100 justify-content-between">
+                                <h6 className="mb-1 text-primary-glow">{method.name}</h6>
+                            </div>
+                            <p className="mb-1 small text-white-50">{method.description}</p>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+    
+    return (
+        <div>
+            {analysisStage === 'analyze' && isLoading && (
+                <div className="text-center p-5">
+                    <div className="spinner-border mb-3" role="status"></div>
+                    <h5>AI is performing the analysis {selectedMethod ? `using "${selectedMethod}"` : ''}...</h5>
+                    <p className="text-white-50">This may take a moment.</p>
+                </div>
+            )}
+            <GeneratedOutput stepId={7} onGenerate={() => handlePerformAnalysis(selectedMethod)} isLoading={isLoading} />
+             {analysisStage === 'complete' && activeExperiment.automationMode !== 'automated' && (
+                 <div className="card-footer d-flex justify-content-end align-items-center bottom-nav">
+                    <button className="btn btn-success" onClick={onStepComplete} disabled={isLoading || !stepData?.output}>
+                        <i className="bi bi-check-circle-fill me-1"></i> Complete Step & Continue
+                    </button>
+                 </div>
             )}
         </div>
     );
@@ -1496,6 +1622,14 @@ const AutomationModeSelector = ({ onSelect }) => {
 
 const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }) => {
     const { addToast } = useToast();
+    const contentRef = useRef(null);
+
+    useEffect(() => {
+        if (contentRef.current) {
+            // This is necessary because React's dangerouslySetInnerHTML doesn't re-render on prop change alone sometimes
+            contentRef.current.innerHTML = marked(publicationText);
+        }
+    }, [publicationText]);
 
     const handleDownload = (format: 'md' | 'doc' | 'pdf') => {
         if (format === 'pdf') {
@@ -1516,8 +1650,10 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }
                         h1, h2, h3 { color: #000; } hr { border: 0; border-top: 1px solid #eee; margin: 20px 0; }
                         code { background-color: #f3f3f3; padding: .2em .4em; font-size: .85em; border-radius: 3px; }
                         pre { background-color: #f3f3f3; padding: 1em; border-radius: 5px; overflow-x: auto; }
+                        img { max-width: 100%; height: auto; border-radius: 5px; margin-top: 1em; margin-bottom: 1em; }
                         @media print {
                             body { margin: 0; padding: 0; }
+                            img { break-inside: avoid; }
                         }
                     </style>
                 </head>
@@ -1568,7 +1704,7 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }
                  </div>
              </div>
              <hr/>
-             <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(publicationText) }} />
+             <div ref={contentRef} className="generated-text-container" />
         </div>
     );
 };
@@ -1592,6 +1728,43 @@ const PublicationExporter = () => {
             setGenerationState('complete');
         }
     }, [activeExperiment]);
+
+    const renderChartsAsBase64 = async (chartConfigs) => {
+        const imagePromises = chartConfigs.map(config => {
+            return new Promise((resolve) => {
+                const offscreenCanvas = document.createElement('canvas');
+                offscreenCanvas.width = 600;
+                offscreenCanvas.height = 400;
+                
+                const chartConfig = {...config, options: {...config.options, animation: false, responsive: false, maintainAspectRatio: false }};
+
+                new Chart(offscreenCanvas, chartConfig);
+                
+                setTimeout(() => {
+                    resolve(offscreenCanvas.toDataURL('image/png'));
+                }, 200);
+            });
+        });
+        return Promise.all(imagePromises);
+    };
+
+    const injectChartsIntoMarkdown = async (markdown, chartData) => {
+        if (!chartData?.chartSuggestions?.length) return markdown;
+
+        addToast("Rendering data visualizations...", "info");
+        const base64Images = await renderChartsAsBase64(chartData.chartSuggestions);
+        let updatedMarkdown = markdown;
+
+        base64Images.forEach((imgData, index) => {
+            const placeholderRegex = new RegExp(`\\[CHART_${index + 1}:(.*?)\\]`, 'gi');
+            updatedMarkdown = updatedMarkdown.replace(placeholderRegex, (match, caption) => {
+                const trimmedCaption = caption.trim();
+                return `\n![${trimmedCaption}](${imgData})\n*Figure ${index + 1}: ${trimmedCaption}*\n`;
+            });
+        });
+        
+        return updatedMarkdown;
+    };
     
     const handleGeneratePublication = async () => {
         if (!gemini) {
@@ -1603,77 +1776,43 @@ const PublicationExporter = () => {
         
         const paperSections = ['Abstract', 'Introduction', 'Methodology', 'Results', 'Discussion', 'Conclusion', 'References'];
         let fullPaper = `# ${activeExperiment.title}\n\n`;
-        const totalSteps = paperSections.length * 2; // 2 iterations per section
+        const totalSteps = paperSections.length;
         let completedSteps = 0;
         
-        // FIX: Cast the 'context' object to 'any' to resolve TypeScript error when accessing 'full_project_summary_log'.
-        // The getStepContext function returns a generic object, so this type assertion is needed to access its dynamic properties.
-        const context: any = getStepContext(activeExperiment, 10);
-
         try {
-            for (const section of paperSections) {
-                let sectionDraft = '';
-                let reviewFeedback = 'No feedback yet, this is the first draft.';
-                
-                for (let i = 1; i <= 2; i++) {
-                    // --- Writer Agent ---
-                    setProgress({
-                        percent: (completedSteps / totalSteps) * 100,
-                        section,
-                        iteration: i,
-                        status: `Agent [Writer] is drafting section: ${section}... (Iteration ${i})`
-                    });
-                    
-                    const writerPrompt = `You are a Writer agent. Your task is to write the "${section}" section of a scientific paper titled "${activeExperiment.title}".
-                    
-                    Tuning controls:
-                    - Desired paper length: ${tuningSettings.length}
-                    - Reference format: ${tuningSettings.referenceFormat}
+            const context = getStepContext(activeExperiment, 10);
+            const { basePrompt, config } = getPromptForStep(10, '', context, tuningSettings);
 
-                    Project Context:
-                    ${context.full_project_summary_log}
+            setProgress({
+                percent: 10,
+                section: 'Drafting',
+                status: 'Agent [Writer] is drafting the full paper...'
+            });
 
-                    Reviewer Feedback from previous iteration:
-                    "${reviewFeedback}"
+            const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+            fullPaper = `# ${activeExperiment.title}\n\n${response.text}`;
+            setPublicationText(fullPaper);
 
-                    Now, write a refined draft of the "${section}" section. Output only the content for this section in Markdown.`;
-                    
-                    const writerResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: writerPrompt });
-                    sectionDraft = writerResponse.text;
-                    
-                    // --- Peer Reviewer Agent ---
-                    completedSteps++;
-                     setProgress({
-                        percent: (completedSteps / totalSteps) * 100,
-                        section,
-                        iteration: i,
-                        status: `Agent [Peer Reviewer] is reviewing the draft... (Iteration ${i})`
-                    });
-                    
-                    const reviewerPrompt = `You are a Peer Reviewer agent. Your task is to review a draft of the "${section}" section of a scientific paper.
-                    
-                    Draft:
-                    "${sectionDraft}"
+            setProgress({ percent: 90, section: 'Complete', iteration: 1, status: 'Injecting visualizations...' });
 
-                    Project Context:
-                    ${context.full_project_summary_log}
-
-                    Provide concise, critical, and actionable feedback to improve this section. Focus on accuracy, clarity, and scientific rigor.`;
-                    
-                    const reviewerResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: reviewerPrompt });
-                    reviewFeedback = reviewerResponse.text;
+            let finalPaperWithCharts = fullPaper;
+            const analysisOutput = activeExperiment.stepData[7]?.output;
+            if (analysisOutput) {
+                try {
+                    const sanitizedText = analysisOutput.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const chartData = JSON.parse(sanitizedText);
+                    finalPaperWithCharts = await injectChartsIntoMarkdown(fullPaper, chartData);
+                } catch(e) {
+                    console.error("Could not parse chart data, skipping injection.", e);
+                    addToast("Could not parse chart data; skipping chart injection.", "warning");
                 }
-
-                fullPaper += `## ${section}\n\n${sectionDraft}\n\n`;
-                setPublicationText(fullPaper); // Update UI with latest section
             }
             
-            setProgress({ percent: 100, section: 'Complete', iteration: 2, status: 'Paper generation complete!' });
+            setPublicationText(finalPaperWithCharts);
             setGenerationState('complete');
             addToast("Publication draft generated successfully!", "success");
 
-            // Save final result
-            const updatedStepData = { ...activeExperiment.stepData, 10: { ...activeExperiment.stepData[10], output: fullPaper, summary: "Publication draft generated via agentic workflow." }};
+            const updatedStepData = { ...activeExperiment.stepData, 10: { ...activeExperiment.stepData[10], output: finalPaperWithCharts, summary: "Publication draft generated." }};
             await updateExperiment({ ...activeExperiment, stepData: updatedStepData, currentStep: 11 });
 
         } catch (error) {
@@ -1722,7 +1861,7 @@ const PublicationExporter = () => {
     const renderGeneratingScreen = () => (
         <div className="p-4">
             <h5 className="fw-bold text-center">AI Agents at Work...</h5>
-            <p className="text-white-50 text-center">An agentic workflow is simulating writing, reviewing, and refining your paper.</p>
+            <p className="text-white-50 text-center">An agentic workflow is simulating writing and refining your paper.</p>
             <div className="progress my-3" style={{height: '20px'}}>
                 <div 
                     className="progress-bar progress-bar-striped progress-bar-animated" 

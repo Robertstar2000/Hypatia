@@ -196,12 +196,13 @@ export const STATISTICAL_METHODS_SCHEMA = {
                 type: Type.OBJECT,
                 properties: {
                     name: { type: Type.STRING, description: "The name of the statistical method (e.g., 'T-Test', 'Linear Regression')." },
-                    description: { type: Type.STRING, description: "A brief explanation of what the method is used for." }
+                    description: { type: Type.STRING, description: "A brief explanation of what the method is used for and why it's suitable." }
                 },
                 required: ["name", "description"]
             }
         }
-    }
+    },
+    required: ["methods"]
 };
 
 
@@ -292,5 +293,6 @@ export const DATA_ANALYZER_SCHEMA = {
                 }
             }
         }
-    }
+    },
+    required: ["summary", "chartSuggestions"]
 };

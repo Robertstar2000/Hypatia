@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, createContext
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
 import { appTests } from './index.test.tsx';
-// import { Chart, registerables } from 'chart.js'; // Temporarily disabled for deployment testing
+import { Chart, registerables } from 'chart.js';
 import {
     Experiment,
     SCIENTIFIC_FIELDS,
@@ -26,7 +26,7 @@ import { ExperimentRunner } from './experimentRunner';
 
 // --- TOP-LEVEL INITIALIZATION ---
 // Initialize libraries here to prevent any race conditions with React's render cycle.
-// Chart.register(...registerables); // Temporarily disabled for deployment testing
+Chart.register(...registerables);
 marked.setOptions({
     gfm: true,
     breaks: true,
@@ -536,8 +536,14 @@ const ResearchSummary = () => {
 
     if (!latestExperiment) return null;
 
-    const lastStepWithOutput = [...Array(10).keys()].map(i => 10-i).find(stepId => latestExperiment.stepData[stepId]?.summary || latestExperiment.stepData[stepId]?.output);
-    const summary = lastStepWithOutput ? latestExperiment.stepData[lastStepWithOutput]?.summary || latestExperiment.stepData[lastStepWithOutput]?.output : 'No summary available yet.';
+    // Defensively access stepData to prevent crashes on malformed experiments
+    const lastStepWithOutput = latestExperiment.stepData 
+        ? [...Array(10).keys()].map(i => 10 - i).find(stepId => latestExperiment.stepData[stepId]?.summary || latestExperiment.stepData[stepId]?.output)
+        : null;
+
+    const summary = lastStepWithOutput && latestExperiment.stepData
+        ? latestExperiment.stepData[lastStepWithOutput]?.summary || latestExperiment.stepData[lastStepWithOutput]?.output
+        : 'No summary available yet.';
 
     return (
         <section className="research-summary-section">
@@ -971,17 +977,64 @@ const UniquenessMeter = ({ score, justification }) => {
 };
 
 const DataAnalysisView = ({ analysisData }) => {
-    // Temporarily disabled for deployment testing.
+    const chartRefs = useRef({});
+
+    useEffect(() => {
+        if (analysisData?.chartSuggestions && Array.isArray(analysisData.chartSuggestions)) {
+            analysisData.chartSuggestions.forEach((config, index) => {
+                const canvas = chartRefs.current[index];
+                if (canvas) {
+                    // Destroy existing chart instance before creating a new one
+                    if (canvas.chartInstance) {
+                        canvas.chartInstance.destroy();
+                    }
+                    try {
+                        canvas.chartInstance = new Chart(canvas, config);
+                    } catch (error) {
+                        console.error(`Failed to render chart ${index}:`, error);
+                    }
+                }
+            });
+        }
+        // Cleanup function to destroy charts when the component unmounts
+        return () => {
+            Object.values(chartRefs.current).forEach((canvas: any) => {
+                if (canvas && canvas.chartInstance) {
+                    canvas.chartInstance.destroy();
+                }
+            });
+        };
+    }, [analysisData]);
+
+    if (!analysisData || !analysisData.summary) {
+        return <div className="alert alert-info">Awaiting analysis results...</div>;
+    }
+
+    const hasCharts = Array.isArray(analysisData.chartSuggestions) && analysisData.chartSuggestions.length > 0;
+
     return (
         <div>
-            {analysisData?.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />}
-            <div className="alert alert-warning mt-4">
-                <i className="bi bi-exclamation-triangle-fill me-2"></i>
-                Chart rendering is temporarily disabled for system stability testing.
-            </div>
+            {analysisData.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />}
+            {hasCharts && (
+                <div className="mt-4">
+                    <h5 className="fw-bold">Data Visualizations</h5>
+                    <div className="row">
+                        {analysisData.chartSuggestions.map((config, index) => (
+                            <div className="col-md-6 mb-3" key={index}>
+                                <div className="card">
+                                    <div className="card-body">
+                                        <canvas ref={el => chartRefs.current[index] = el}></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
+
 
 // FIX: Explicitly type component with React.FC to fix key prop type error.
 const GeneratedOutput: React.FC<{
@@ -1700,12 +1753,29 @@ const PublicationExporter = () => {
     }, [activeExperiment]);
 
     const renderChartsAsBase64 = async (chartConfigs) => {
-        // Temporarily disabled for deployment testing.
-        if (Array.isArray(chartConfigs) && chartConfigs.length > 0) {
-            console.warn("Chart rendering for publication export is temporarily disabled for testing.");
-            addToast("Chart rendering for publications is disabled for testing.", 'info');
-        }
-        return [];
+        if (!Array.isArray(chartConfigs)) return [];
+
+        const imagePromises = chartConfigs.map(async (config, index) => {
+            if (!config || typeof config !== 'object') return null;
+            
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = 600;
+            offscreenCanvas.height = 400;
+            
+            try {
+                const chart = new Chart(offscreenCanvas, { ...config, options: { ...config.options, animation: false, responsive: false } });
+                await new Promise(resolve => setTimeout(resolve, 500)); 
+                const dataUrl = chart.toBase64Image();
+                chart.destroy();
+                return dataUrl;
+            } catch(error) {
+                console.error(`Failed to render chart ${index} for export:`, error);
+                addToast(`Chart ${index+1} could not be rendered for export.`, 'warning');
+                return null;
+            }
+        });
+
+        return Promise.all(imagePromises);
     };
 
     const injectChartsIntoMarkdown = async (markdown, chartData) => {

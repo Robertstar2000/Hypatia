@@ -3,6 +3,7 @@
 
 
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -28,14 +29,6 @@ import {
 import { ToastProvider, useToast } from './toast';
 import { ExperimentRunner } from './experimentRunner';
 
-
-Chart.register(...registerables);
-
-// Configure marked for better markdown rendering
-marked.setOptions({
-    gfm: true,
-    breaks: true,
-});
 
 // --- REACT CONTEXT ---
 const ExperimentContext = createContext<ExperimentContextType | null>(null);
@@ -63,6 +56,15 @@ const App = () => {
     const [isLabNotebookOpen, setLabNotebookOpen] = useState(false);
 
     const { addToast } = useToast();
+
+    // Initialize libraries safely on mount
+    useEffect(() => {
+        Chart.register(...registerables);
+        marked.setOptions({
+            gfm: true,
+            breaks: true,
+        });
+    }, []);
 
     // Load experiments from Dexie on initial mount
     useEffect(() => {

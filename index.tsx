@@ -1,6 +1,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -2099,14 +2101,3 @@ root.render(
         </ToastProvider>
     </React.StrictMode>
 );
-
-// Expose update function for PublicationExporter hack
-(window as any)._updateActiveExperiment = (exp) => {
-    // This is a workaround and should be replaced with a proper state management solution
-    // For now, it simulates an update from a child component.
-    const rootContext = (root as any)._internalRoot.current.memoizedState.element.props.value;
-    if (rootContext) {
-        rootContext.setActiveExperiment(exp);
-        rootContext.updateExperiment(exp);
-    }
-};

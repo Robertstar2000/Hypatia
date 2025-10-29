@@ -9,8 +9,8 @@ class ExperimentDatabase extends Dexie {
 
     constructor() {
         super("ProjectHypatiaDB");
-        // Fix: Explicitly cast 'this' to Dexie to work around a type inference issue where
-        // the 'version' method was not being found on the extended class.
+        // FIX: Explicitly cast `this` to `Dexie` to resolve a TypeScript typing issue where
+        // the `version` method is not found on the subclass instance within the constructor.
         (this as Dexie).version(2).stores({
             // Schema definition: 'id' is the primary key. 'title' and 'createdAt' are indexed for faster lookups.
             experiments: 'id, title, createdAt'

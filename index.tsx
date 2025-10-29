@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef, createContext
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
 import { appTests } from './index.test.tsx';
-import { Chart, registerables } from 'chart.js';
+// import { Chart, registerables } from 'chart.js'; // Temporarily disabled for deployment testing
 import {
     Experiment,
     SCIENTIFIC_FIELDS,
@@ -26,7 +26,7 @@ import { ExperimentRunner } from './experimentRunner';
 
 // --- TOP-LEVEL INITIALIZATION ---
 // Initialize libraries here to prevent any race conditions with React's render cycle.
-Chart.register(...registerables);
+// Chart.register(...registerables); // Temporarily disabled for deployment testing
 marked.setOptions({
     gfm: true,
     breaks: true,
@@ -971,46 +971,13 @@ const UniquenessMeter = ({ score, justification }) => {
 };
 
 const DataAnalysisView = ({ analysisData }) => {
-    const chartRefs = useRef({});
-
-    useEffect(() => {
-        if (analysisData && Array.isArray(analysisData.chartSuggestions)) {
-            analysisData.chartSuggestions.forEach((chartConfig, index) => {
-                const canvas = chartRefs.current[index];
-                if (canvas) {
-                    try {
-                        const existingChart = Chart.getChart(canvas);
-                        if (existingChart) {
-                            existingChart.destroy();
-                        }
-                        new Chart(canvas.getContext('2d'), chartConfig);
-                    } catch (error) {
-                        console.error(`Failed to render chart at index ${index} due to invalid configuration:`, error);
-                    }
-                }
-            });
-        }
-        return () => {
-            Object.values(chartRefs.current).forEach((canvas: any) => {
-                if (canvas) {
-                    const chart = Chart.getChart(canvas);
-                    if (chart) {
-                        chart.destroy();
-                    }
-                }
-            });
-        };
-    }, [analysisData]);
-
+    // Temporarily disabled for deployment testing.
     return (
         <div>
             {analysisData?.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />}
-            <div className="row mt-4">
-                {analysisData && Array.isArray(analysisData.chartSuggestions) && analysisData.chartSuggestions.map((_, index) => (
-                    <div className="col-md-6 mb-4" key={index}>
-                        <canvas ref={el => chartRefs.current[index] = el}></canvas>
-                    </div>
-                ))}
+            <div className="alert alert-warning mt-4">
+                <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                Chart rendering is temporarily disabled for system stability testing.
             </div>
         </div>
     );
@@ -1733,39 +1700,12 @@ const PublicationExporter = () => {
     }, [activeExperiment]);
 
     const renderChartsAsBase64 = async (chartConfigs) => {
-        if (!Array.isArray(chartConfigs)) {
-            return [];
+        // Temporarily disabled for deployment testing.
+        if (Array.isArray(chartConfigs) && chartConfigs.length > 0) {
+            console.warn("Chart rendering for publication export is temporarily disabled for testing.");
+            addToast("Chart rendering for publications is disabled for testing.", 'info');
         }
-        const imagePromises = chartConfigs.map(config => {
-            return new Promise((resolve) => {
-                try {
-                    const offscreenCanvas = document.createElement('canvas');
-                    offscreenCanvas.width = 600;
-                    offscreenCanvas.height = 400;
-                    
-                    const chartConfig = {
-                        ...config, 
-                        options: {
-                            ...(config.options || {}), 
-                            animation: false, 
-                            responsive: false, 
-                            maintainAspectRatio: false 
-                        }
-                    };
-
-                    new Chart(offscreenCanvas, chartConfig);
-                    
-                    setTimeout(() => {
-                        resolve(offscreenCanvas.toDataURL('image/png'));
-                    }, 200); // Timeout to allow chart to render before capture
-                } catch (error) {
-                    console.error("Failed to render chart for export:", error);
-                    addToast('A chart could not be rendered and was skipped.', 'warning');
-                    resolve(''); // Resolve with an empty string so Promise.all doesn't reject.
-                }
-            });
-        });
-        return Promise.all(imagePromises);
+        return [];
     };
 
     const injectChartsIntoMarkdown = async (markdown, chartData) => {

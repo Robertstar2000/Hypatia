@@ -24,6 +24,15 @@ import { ToastProvider, useToast } from './toast';
 import { ExperimentRunner } from './experimentRunner';
 
 
+// --- TOP-LEVEL INITIALIZATION ---
+// Initialize libraries here to prevent any race conditions with React's render cycle.
+Chart.register(...registerables);
+marked.setOptions({
+    gfm: true,
+    breaks: true,
+});
+
+
 // --- REACT CONTEXT ---
 const ExperimentContext = createContext<ExperimentContextType | null>(null);
 export const useExperiment = () => {
@@ -50,15 +59,6 @@ const App = () => {
     const [isLabNotebookOpen, setLabNotebookOpen] = useState(false);
 
     const { addToast } = useToast();
-
-    // Initialize libraries safely on mount
-    useEffect(() => {
-        Chart.register(...registerables);
-        marked.setOptions({
-            gfm: true,
-            breaks: true,
-        });
-    }, []);
 
     // Load experiments from Dexie on initial mount
     useEffect(() => {

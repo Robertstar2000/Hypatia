@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -980,24 +974,29 @@ const DataAnalysisView = ({ analysisData }) => {
     const chartRefs = useRef({});
 
     useEffect(() => {
-        analysisData.chartSuggestions.forEach((chartConfig, index) => {
-            const canvas = chartRefs.current[index];
-            if (canvas) {
-                // Destroy existing chart instance if it exists
-                const existingChart = Chart.getChart(canvas);
-                if (existingChart) {
-                    existingChart.destroy();
+        if (analysisData && Array.isArray(analysisData.chartSuggestions)) {
+            analysisData.chartSuggestions.forEach((chartConfig, index) => {
+                const canvas = chartRefs.current[index];
+                if (canvas) {
+                    try {
+                        const existingChart = Chart.getChart(canvas);
+                        if (existingChart) {
+                            existingChart.destroy();
+                        }
+                        new Chart(canvas.getContext('2d'), chartConfig);
+                    } catch (error) {
+                        console.error(`Failed to render chart at index ${index} due to invalid configuration:`, error);
+                    }
                 }
-                // Create new chart
-                new Chart(canvas.getContext('2d'), chartConfig);
-            }
-        });
-        // Cleanup charts on component unmount
+            });
+        }
         return () => {
-             Object.values(chartRefs.current).forEach((canvas: any) => {
-                const chart = Chart.getChart(canvas);
-                if (chart) {
-                    chart.destroy();
+            Object.values(chartRefs.current).forEach((canvas: any) => {
+                if (canvas) {
+                    const chart = Chart.getChart(canvas);
+                    if (chart) {
+                        chart.destroy();
+                    }
                 }
             });
         };
@@ -1005,9 +1004,9 @@ const DataAnalysisView = ({ analysisData }) => {
 
     return (
         <div>
-            <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />
+            {analysisData?.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />}
             <div className="row mt-4">
-                {analysisData.chartSuggestions.map((_, index) => (
+                {analysisData && Array.isArray(analysisData.chartSuggestions) && analysisData.chartSuggestions.map((_, index) => (
                     <div className="col-md-6 mb-4" key={index}>
                         <canvas ref={el => chartRefs.current[index] = el}></canvas>
                     </div>
@@ -1091,7 +1090,7 @@ const GeneratedOutput: React.FC<{
             }
 
             // Step 7: Data Analyzer
-            if (stepId === 7 && data.summary && data.chartSuggestions) {
+            if (stepId === 7 && data.summary && Array.isArray(data.chartSuggestions)) {
                  return <DataAnalysisView analysisData={data} />;
             }
             throw new Error("JSON format is valid, but does not match expected structure for this step.");
@@ -1734,19 +1733,36 @@ const PublicationExporter = () => {
     }, [activeExperiment]);
 
     const renderChartsAsBase64 = async (chartConfigs) => {
+        if (!Array.isArray(chartConfigs)) {
+            return [];
+        }
         const imagePromises = chartConfigs.map(config => {
             return new Promise((resolve) => {
-                const offscreenCanvas = document.createElement('canvas');
-                offscreenCanvas.width = 600;
-                offscreenCanvas.height = 400;
-                
-                const chartConfig = {...config, options: {...config.options, animation: false, responsive: false, maintainAspectRatio: false }};
+                try {
+                    const offscreenCanvas = document.createElement('canvas');
+                    offscreenCanvas.width = 600;
+                    offscreenCanvas.height = 400;
+                    
+                    const chartConfig = {
+                        ...config, 
+                        options: {
+                            ...(config.options || {}), 
+                            animation: false, 
+                            responsive: false, 
+                            maintainAspectRatio: false 
+                        }
+                    };
 
-                new Chart(offscreenCanvas, chartConfig);
-                
-                setTimeout(() => {
-                    resolve(offscreenCanvas.toDataURL('image/png'));
-                }, 200);
+                    new Chart(offscreenCanvas, chartConfig);
+                    
+                    setTimeout(() => {
+                        resolve(offscreenCanvas.toDataURL('image/png'));
+                    }, 200); // Timeout to allow chart to render before capture
+                } catch (error) {
+                    console.error("Failed to render chart for export:", error);
+                    addToast('A chart could not be rendered and was skipped.', 'warning');
+                    resolve(''); // Resolve with an empty string so Promise.all doesn't reject.
+                }
             });
         });
         return Promise.all(imagePromises);
@@ -1760,6 +1776,7 @@ const PublicationExporter = () => {
         let updatedMarkdown = markdown;
 
         base64Images.forEach((imgData, index) => {
+            if (!imgData) return; // Skip if the chart failed to render
             const placeholderRegex = new RegExp(`\\[CHART_${index + 1}:(.*?)\\]`, 'gi');
             updatedMarkdown = updatedMarkdown.replace(placeholderRegex, (match, caption) => {
                 const trimmedCaption = caption.trim();

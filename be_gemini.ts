@@ -16,29 +16,35 @@ import {
 // --- GEMINI API SERVICE ---
 
 let geminiInstance: GoogleGenAI | null = null;
-let currentApiKey: string | null = null;
 
-export const initializeGemini = (userApiKey?: string): GoogleGenAI | null => {
-    const apiKey = userApiKey || process.env.API_KEY;
+export const initializeGemini = (): GoogleGenAI | null => {
+    // Adhere to security guidelines: API key is exclusively from environment variables.
+    const apiKey = process.env.API_KEY;
 
-    if (geminiInstance && currentApiKey === apiKey) {
+    if (geminiInstance) {
         return geminiInstance;
     }
 
     if (!apiKey) {
-        console.warn("API key is not available. Waiting for user input.");
-        geminiInstance = null;
-        currentApiKey = null;
+        console.error("API key is not configured in environment variables.");
         return null;
     }
     
-    geminiInstance = new GoogleGenAI({ apiKey });
-    currentApiKey = apiKey;
-    return geminiInstance;
+    try {
+        geminiInstance = new GoogleGenAI({ apiKey });
+        return geminiInstance;
+    } catch (e) {
+        console.error("Failed to initialize GoogleGenAI:", e);
+        geminiInstance = null;
+        return null;
+    }
 };
 
 export const parseGeminiError = (error: any, fallbackMessage: string = "An unknown error occurred."): string => {
     console.error("Gemini API Error:", error);
+    if (error?.error?.message) {
+        return error.error.message;
+    }
     const message = error?.message || '';
     if (message.includes('API key not valid')) {
         return 'API Key is not valid. Please check your key and try again.';
@@ -180,7 +186,8 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
             config.responseSchema = RESEARCH_QUESTION_SCHEMA;
             break;
         case 2:
-            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool. Your final output must be ONLY a single, raw JSON object (no markdown backticks or explanations). The JSON object must contain a 'summary' key (with a markdown string value) and a 'references' key (with an array of objects, where each object has 'title', 'authors' (as an array of strings), 'year' (as a number), 'journal', and 'url' keys).`;
+            expectJson = true;
+            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool. Your final output must be ONLY a single JSON object inside a markdown code block (e.g., \`\`\`json\n{...}\n\`\`\`). Do not include any other text or explanations. The JSON object must contain a 'summary' key (with a markdown string value) and a 'references' key (with an array of objects, where each object has 'title', 'authors' (as an array of strings), 'year' (as a number), 'journal', and 'url' keys).`;
             config.tools = [{ googleSearch: {} }];
             break;
         case 3:

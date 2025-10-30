@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react';
 import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
@@ -43,6 +44,76 @@ export const useExperiment = () => {
     return context;
 };
 
+// --- UTILITY FUNCTIONS ---
+/**
+ * Ensures a Chart.js configuration object has default styling to prevent invisible charts.
+ * @param config - The Chart.js configuration object from the AI.
+ * @returns A new configuration object with guaranteed styling.
+ */
+const ensureChartStyling = (config) => {
+    const newConfig = JSON.parse(JSON.stringify(config)); // Deep copy
+    const themeColors = [
+        'rgba(0, 242, 254, 0.7)', // primary-glow
+        'rgba(166, 74, 255, 0.7)', // secondary-glow
+        'rgba(255, 205, 86, 0.7)', // yellow
+        'rgba(75, 192, 192, 0.7)',  // teal
+        'rgba(255, 99, 132, 0.7)',  // red
+        'rgba(54, 162, 235, 0.7)',  // blue
+    ];
+    const borderColors = themeColors.map(c => c.replace('0.7', '1'));
+
+    if (newConfig.data && newConfig.data.datasets) {
+        newConfig.data.datasets.forEach((dataset, index) => {
+            if (!dataset.backgroundColor) {
+                dataset.backgroundColor = (newConfig.type === 'pie' || newConfig.type === 'doughnut') 
+                    ? themeColors 
+                    : themeColors[index % themeColors.length];
+            }
+            if (!dataset.borderColor) {
+                dataset.borderColor = borderColors[index % borderColors.length];
+            }
+            if (dataset.borderWidth === undefined) {
+                dataset.borderWidth = 1;
+            }
+        });
+    }
+    
+    // Set default options for all charts to ensure responsiveness and proper sizing.
+    if (!newConfig.options) {
+        newConfig.options = {};
+    }
+    newConfig.options = {
+        responsive: true,
+        maintainAspectRatio: false, // This is critical for charts in flexible containers
+        ...newConfig.options,
+        scales: {
+            ...(newConfig.options.scales || {}),
+            x: {
+                ...(newConfig.options.scales?.x || {}),
+                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
+                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            },
+            y: {
+                ...(newConfig.options.scales?.y || {}),
+                ticks: { color: 'rgba(255, 255, 255, 0.7)' },
+                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            }
+        },
+        plugins: {
+            ...(newConfig.options.plugins || {}),
+            legend: {
+                ...(newConfig.options.plugins?.legend || {}),
+                labels: {
+                    color: 'rgba(255, 255, 255, 0.8)'
+                }
+            }
+        }
+    };
+
+
+    return newConfig;
+};
+
 
 // --- REACT COMPONENTS ---
 
@@ -60,18 +131,28 @@ const App = () => {
 
     const { addToast } = useToast();
 
-    // Load experiments from Dexie on initial mount
+    // Initialize Gemini and load experiments from Dexie on initial mount
     useEffect(() => {
         const loadData = async () => {
             try {
+                // Initialize Gemini first
+                const geminiInstance = initializeGemini();
+                if (geminiInstance) {
+                    setGemini(geminiInstance);
+                    addToast("Gemini API connection successful.", 'success');
+                } else {
+                     addToast("Gemini API key not found. Please configure it to use AI features.", 'danger');
+                }
+
+                // Then load experiments
                 const storedExperiments = await db.experiments.orderBy('createdAt').reverse().toArray();
                 setExperiments(storedExperiments);
                 if (storedExperiments.length > 0) {
                     setActiveExperiment(storedExperiments[0]);
                 }
             } catch (error) {
-                console.error("Failed to load experiments from database:", error);
-                addToast("Could not load saved experiments.", 'danger');
+                console.error("Failed to load data:", error);
+                addToast("Could not load saved experiments or initialize AI.", 'danger');
             } finally {
                 setIsLoading(false);
             }
@@ -85,15 +166,6 @@ const App = () => {
              setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 100);
         }
     }, [gemini, view]);
-
-    const handleAuthentication = (apiKey: string) => {
-        try {
-            const geminiInstance = initializeGemini(apiKey);
-            setGemini(geminiInstance);
-        } catch (e) {
-            addToast(parseGeminiError(e), 'danger');
-        }
-    };
 
 
     // Handlers for experiment management
@@ -220,7 +292,6 @@ const App = () => {
             <main className="container-fluid mt-4">
                 {view === 'landing' && <LandingPage 
                     setView={setView}
-                    onAuthenticate={handleAuthentication}
                 />}
                 {view === 'dashboard' && <Dashboard setView={setView} />}
                 {view === 'experiment' && activeExperiment && <ExperimentWorkspace key={activeExperiment.id} />}
@@ -269,7 +340,7 @@ const Header = ({ setView, activeView, onToggleNotebook }) => {
                         <ul className="navbar-nav ms-auto">
                             {gemini && (
                                 <li className="nav-item">
-                                    <span className="nav-link text-success"><i className="bi bi-check-circle-fill me-1"></i> API Key Active</span>
+                                    <span className="nav-link text-success"><i className="bi bi-check-circle-fill me-1"></i> API Connection Active</span>
                                 </li>
                             )}
                              {activeView !== 'landing' && (
@@ -302,73 +373,17 @@ const Footer = () => (
 );
 
 
-const ApiKeySection = ({ onAuthenticate }) => {
-    const [userApiKey, setUserApiKey] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const { addToast } = useToast();
-
-    const handleValidate = async () => {
-        if (!userApiKey.trim()) {
-            addToast("Please enter your API key.", 'warning');
-            return;
-        }
-        setIsLoading(true);
-        const isValid = await testApiKey(userApiKey.trim());
-        if (isValid) {
-            addToast("API Key validated successfully!", 'success');
-            onAuthenticate(userApiKey.trim());
-        } else {
-            addToast("API Key is not valid. Please check your key and try again.", 'danger');
-        }
-        setIsLoading(false);
-    };
-
-    return (
-        <section className="api-key-section text-center">
-            <div className="container">
-                <div className="row justify-content-center">
-                    <div className="col-lg-8">
-                        <h2 className="section-title">API Key Access</h2>
-                        <p className="lead text-white-50">This application requires a Google Gemini API key to function. The key is stored in memory and is not saved anywhere.</p>
-                        <div className="card">
-                            <div className="card-body p-4">
-                                <div>
-                                    <h5>Enter Your Google API Key</h5>
-                                    <p className="text-white-50">
-                                        You can get your own free API key from Google AI Studio.
-                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="ms-2">Get a key here <i className="bi bi-box-arrow-up-right"></i></a>
-                                    </p>
-                                    <div className="input-group">
-                                        <input type="password" className="form-control" placeholder="Enter your API key" value={userApiKey} onChange={e => setUserApiKey(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleValidate()} />
-                                        <button className="btn btn-primary" onClick={handleValidate} disabled={isLoading}>
-                                            {isLoading ? 'Validating...' : 'Validate & Use Key'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
-};
-
-
-const LandingPage = ({ setView, onAuthenticate }) => {
+const LandingPage = ({ setView }) => {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [field, setField] = useState<string>(SCIENTIFIC_FIELDS[0]);
     const { addToast } = useToast();
     const { gemini, createNewExperiment } = useExperiment();
-    const authSectionRef = useRef<HTMLDivElement>(null);
 
     const handleStart = (e) => {
         e.preventDefault();
         if (!gemini) {
-            addToast("Please complete the API Key Access step below to begin.", 'warning');
-            authSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-            return;
+            addToast("The Gemini API connection is not active. AI features will be unavailable.", 'warning');
         }
         if(title.trim() && description.trim()){
             createNewExperiment(title, description, field);
@@ -377,9 +392,7 @@ const LandingPage = ({ setView, onAuthenticate }) => {
 
     const handleGoToDashboard = () => {
         if (!gemini) {
-            addToast("Please complete the API Key Access step below to continue.", 'warning');
-            authSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-            return;
+            addToast("The Gemini API connection is not active. AI features will be unavailable.", 'warning');
         }
         setView('dashboard');
     };
@@ -521,20 +534,22 @@ const LandingPage = ({ setView, onAuthenticate }) => {
 
                 </div>
             </section>
-            
-            <div ref={authSectionRef}>
-                { !gemini && <ApiKeySection onAuthenticate={onAuthenticate} /> }
-            </div>
         </div>
     );
 };
 
 
 const ResearchSummary = () => {
-    const { experiments } = useExperiment();
+    const { experiments, selectExperiment } = useExperiment();
     const latestExperiment = experiments.length > 0 ? experiments[0] : null;
 
     if (!latestExperiment) return null;
+
+    const handleContinueResearch = () => {
+        if (latestExperiment) {
+            selectExperiment(latestExperiment.id);
+        }
+    };
 
     // Defensively find the last step with any output by inspecting actual keys
     const lastStepWithOutput = latestExperiment.stepData
@@ -562,7 +577,7 @@ const ResearchSummary = () => {
             <div className="row">
                 <div className="col-lg-8 mx-auto">
                      <h2 className="section-title text-center mb-4">Your Latest Research</h2>
-                     <div className="card">
+                     <div className="card" onClick={handleContinueResearch} style={{cursor: 'pointer'}} title="Click to continue this project">
                         <div className="card-body">
                             <h5 className="card-title text-primary-glow">{latestExperiment.title}</h5>
                             <h6 className="card-subtitle mb-2 text-white-50">{latestExperiment.field}</h6>
@@ -570,6 +585,9 @@ const ResearchSummary = () => {
                                 <p className="mb-0 fst-italic">"{summaryText.substring(0, 200)}{summaryText.length > 200 ? '...' : ''}"</p>
                             </blockquote>
                             <p className="mt-3 small text-white-50">Currently at: Step {latestExperiment.currentStep} - {currentStepInfo}</p>
+                        </div>
+                        <div className="card-footer bg-transparent border-top-0 text-end">
+                            <button className="btn btn-primary" onClick={handleContinueResearch}>Continue Project <i className="bi bi-arrow-right"></i></button>
                         </div>
                      </div>
                 </div>
@@ -988,35 +1006,53 @@ const UniquenessMeter = ({ score, justification }) => {
     );
 };
 
+/**
+ * @component DataAnalysisView
+ * A robust component for rendering Chart.js visualizations.
+ * FIX: This component has been rewritten to be more robust. It uses a single, comprehensive
+ * useEffect hook to manage the lifecycle of chart instances. It uses a timeout to delay
+ * rendering, giving parent components (like accordions) time to animate and become visible,
+ * which is crucial for Chart.js to calculate the canvas size correctly.
+ */
 const DataAnalysisView = ({ analysisData }) => {
     const chartRefs = useRef({});
+    const chartInstances = useRef(new Map());
 
     useEffect(() => {
+        const instances = chartInstances.current;
+        // Always clean up previous charts before creating new ones.
+        instances.forEach(chart => chart.destroy());
+        instances.clear();
+
         if (analysisData?.chartSuggestions && Array.isArray(analysisData.chartSuggestions)) {
-            analysisData.chartSuggestions.forEach((config, index) => {
-                const canvas = chartRefs.current[index];
-                if (canvas) {
-                    // Destroy existing chart instance before creating a new one
-                    if (canvas.chartInstance) {
-                        canvas.chartInstance.destroy();
+            // Defer chart creation to allow the DOM (e.g., accordions in the summary view)
+            // to finish animating and become visible. This prevents Chart.js from rendering
+            // into a zero-size canvas, which results in a blank chart.
+            const renderTimeout = setTimeout(() => {
+                analysisData.chartSuggestions.forEach((config, index) => {
+                    const canvas = chartRefs.current[index];
+                    // Double-check that the canvas element is in the DOM and visible.
+                    if (canvas && canvas.offsetParent !== null) {
+                        try {
+                            const styledConfig = ensureChartStyling(config);
+                            const newChart = new Chart(canvas, styledConfig);
+                            instances.set(index, newChart);
+                        } catch (error) {
+                            console.error(`Failed to render chart ${index}:`, error, config);
+                        }
                     }
-                    try {
-                        canvas.chartInstance = new Chart(canvas, config);
-                    } catch (error) {
-                        console.error(`Failed to render chart ${index}:`, error);
-                    }
-                }
-            });
+                });
+            }, 300); // A 300ms delay is generally sufficient for standard UI animations.
+
+            // The return function from useEffect serves as the cleanup function.
+            // It runs when the component unmounts or when `analysisData` changes.
+            return () => {
+                clearTimeout(renderTimeout);
+                instances.forEach(chart => chart.destroy());
+                instances.clear();
+            };
         }
-        // Cleanup function to destroy charts when the component unmounts
-        return () => {
-            Object.values(chartRefs.current).forEach((canvas: any) => {
-                if (canvas && canvas.chartInstance) {
-                    canvas.chartInstance.destroy();
-                }
-            });
-        };
-    }, [analysisData]);
+    }, [analysisData]); // Effect runs only when the data changes.
 
     if (!analysisData || !analysisData.summary) {
         return <div className="alert alert-info">Awaiting analysis results...</div>;
@@ -1031,10 +1067,11 @@ const DataAnalysisView = ({ analysisData }) => {
                 <div className="mt-4">
                     <h5 className="fw-bold">Data Visualizations</h5>
                     <div className="row">
-                        {analysisData.chartSuggestions.map((config, index) => (
+                        {analysisData.chartSuggestions.map((_config, index) => (
                             <div className="col-md-6 mb-3" key={index}>
-                                <div className="card">
-                                    <div className="card-body">
+                                <div className="card h-100">
+                                    <div className="card-body" style={{ minHeight: '300px', position: 'relative' }}>
+                                        {/* Canvas needs to be inside a relatively positioned container for responsive sizing */}
                                         <canvas ref={el => chartRefs.current[index] = el}></canvas>
                                     </div>
                                 </div>
@@ -1240,6 +1277,11 @@ const ExperimentWorkspace = () => {
     const [fineTuneModalOpen, setFineTuneModalOpen] = useState(false);
     const { addToast } = useToast();
 
+    const experimentRef = useRef(activeExperiment);
+    useEffect(() => {
+        experimentRef.current = activeExperiment;
+    }, [activeExperiment]);
+
     const stepData = useMemo(() => activeExperiment.stepData[activeStep] || {}, [activeExperiment.stepData, activeStep]);
     const fineTuneSettings = useMemo(() => activeExperiment.fineTuneSettings[activeStep] || {}, [activeExperiment.fineTuneSettings, activeStep]);
 
@@ -1320,33 +1362,64 @@ const ExperimentWorkspace = () => {
             return;
         }
         setIsLoading(true);
-        let currentOutput = '';
+
+        // Always get the latest state from the ref to build context
+        const currentExperiment = experimentRef.current;
+        const currentStepData = currentExperiment.stepData[activeStep] || {};
+        const context = getStepContext(currentExperiment, activeStep);
+        const { basePrompt, expectJson, config } = getPromptForStep(
+            activeStep,
+            currentStepData.input || '',
+            context,
+            fineTuneSettings,
+            regenerateFeedback
+        );
         
-        try {
-            const context = getStepContext(activeExperiment, activeStep);
-            const { basePrompt, config } = getPromptForStep(activeStep, stepData.input || '', context, fineTuneSettings, regenerateFeedback);
-            
-            const stream = await gemini.models.generateContentStream({model: 'gemini-2.5-flash', contents: basePrompt, config});
-            
-            let buffer = '';
-            for await (const chunk of stream) {
-                buffer += chunk.text;
-                // Update the state in a non-persisted way for live display
-                setActiveExperiment(exp => ({...exp, stepData: {...exp.stepData, [activeStep]: {...exp.stepData[activeStep], output: buffer}}}));
+        if (expectJson) {
+            try {
+                const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+                const finalOutput = response.text;
+                const finalStepData = {
+                    ...currentStepData,
+                    output: finalOutput,
+                    provenance: [...(currentStepData.provenance || []), { timestamp: new Date().toISOString(), prompt: basePrompt, config, output: finalOutput }]
+                };
+                // Use the ref to ensure we're updating the most recent version of the experiment
+                await updateExperiment({ ...experimentRef.current, stepData: { ...experimentRef.current.stepData, [activeStep]: finalStepData } });
+            } catch (error) {
+                const errorOutput = `Error: ${parseGeminiError(error)}`;
+                addToast(parseGeminiError(error), 'danger');
+                const finalStepData = { ...currentStepData, output: errorOutput };
+                await updateExperiment({ ...experimentRef.current, stepData: { ...experimentRef.current.stepData, [activeStep]: finalStepData } });
+            } finally {
+                setIsLoading(false);
             }
-            currentOutput = buffer;
-            
-        } catch (error) {
-            currentOutput = `Error: ${parseGeminiError(error)}`;
-            addToast(parseGeminiError(error), 'danger');
-        } finally {
-             const finalStepData = {
-                ...stepData,
-                output: currentOutput,
-                provenance: [...(stepData.provenance || []), { timestamp: new Date().toISOString(), prompt: 'See prompt generation logic', config: {}, output: currentOutput }]
-            };
-             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, [activeStep]: finalStepData } });
-            setIsLoading(false);
+        } else { // Streaming Logic
+            let finalOutput = '';
+            try {
+                const stream = await gemini.models.generateContentStream({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+                let buffer = '';
+                for await (const chunk of stream) {
+                    buffer += chunk.text;
+                    // Functional update is safe and keeps UI responsive
+                    setActiveExperiment(exp => ({ ...exp, stepData: { ...exp.stepData, [activeStep]: { ...(exp.stepData[activeStep] || {}), output: buffer } } }));
+                }
+                finalOutput = buffer;
+            } catch (error) {
+                finalOutput = `Error: ${parseGeminiError(error)}`;
+                addToast(parseGeminiError(error), 'danger');
+            } finally {
+                 // After streaming, the ref holds the latest state due to setActiveExperiment.
+                 // We'll perform one final update to persist the complete text and provenance.
+                const latestExperiment = experimentRef.current;
+                const finalStepData = {
+                    ...(latestExperiment.stepData[activeStep] || {}),
+                    output: finalOutput, // Ensure complete final text is saved
+                    provenance: [...((latestExperiment.stepData[activeStep] || {}).provenance || []), { timestamp: new Date().toISOString(), prompt: basePrompt, config, output: finalOutput }]
+                };
+                await updateExperiment({ ...latestExperiment, stepData: { ...latestExperiment.stepData, [activeStep]: finalStepData } });
+                setIsLoading(false);
+            }
         }
     };
     
@@ -1498,20 +1571,7 @@ const DataAnalysisWorkspace = ({ onStepComplete }) => {
     
     const stepData = activeExperiment.stepData[7] || {};
 
-    useEffect(() => {
-        if (stepData.output) {
-            setAnalysisStage('complete');
-        } else if (activeExperiment.automationMode === 'automated') {
-            handlePerformAnalysis(null, { isAutomated: true });
-        } else {
-            setAnalysisStage('suggest');
-            if (suggestedMethods.length === 0) {
-                handleSuggestMethods();
-            }
-        }
-    }, [activeExperiment.automationMode]);
-
-    const handleSuggestMethods = async () => {
+    const handleSuggestMethods = useCallback(async () => {
         setIsLoading(true);
         try {
             const context = getStepContext(activeExperiment, 7);
@@ -1525,10 +1585,9 @@ const DataAnalysisWorkspace = ({ onStepComplete }) => {
         } finally {
             setIsLoading(false);
         }
-    };
-    
-    // FIX: Explicitly type extraSettings to allow for the 'isAutomated' property.
-    const handlePerformAnalysis = async (method: string | null, extraSettings: { isAutomated?: boolean } = {}) => {
+    }, [activeExperiment, gemini, addToast]);
+
+    const handlePerformAnalysis = useCallback(async (method: string | null, extraSettings: { isAutomated?: boolean } = {}) => {
         setSelectedMethod(method);
         setIsLoading(true);
         setAnalysisStage('analyze');
@@ -1543,15 +1602,8 @@ const DataAnalysisWorkspace = ({ onStepComplete }) => {
             };
             const { basePrompt, config } = getPromptForStep(7, stepData.input || '', context, fineTuneSettings);
             
-            const stream = await gemini.models.generateContentStream({model: 'gemini-2.5-flash', contents: basePrompt, config});
-            
-            let buffer = '';
-            for await (const chunk of stream) {
-                buffer += chunk.text;
-                // Live update for display without saving to DB yet
-                setActiveExperiment(exp => ({...exp, stepData: {...exp.stepData, 7: {...exp.stepData[7], output: buffer}}}));
-            }
-            currentOutput = buffer;
+            const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+            currentOutput = response.text;
 
         } catch (error) {
             currentOutput = `Error: ${parseGeminiError(error)}`;
@@ -1561,12 +1613,25 @@ const DataAnalysisWorkspace = ({ onStepComplete }) => {
              await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
              setIsLoading(false);
              setAnalysisStage('complete');
-             // If this was an automated run, we need to call onStepComplete
              if (extraSettings.isAutomated) {
                 onStepComplete();
              }
         }
-    };
+    }, [activeExperiment, updateExperiment, gemini, stepData, addToast, onStepComplete]);
+
+    useEffect(() => {
+        if (stepData.output) {
+            setAnalysisStage('complete');
+        } else if (activeExperiment.automationMode === 'automated') {
+            handlePerformAnalysis(null, { isAutomated: true });
+        } else {
+            setAnalysisStage('suggest');
+            if (suggestedMethods.length === 0) {
+                handleSuggestMethods();
+            }
+        }
+    }, [activeExperiment.automationMode, stepData.output, suggestedMethods.length, handlePerformAnalysis, handleSuggestMethods]);
+
 
     if (isLoading && analysisStage !== 'analyze') {
         return <div className="text-center p-4"><div className="spinner-border"></div><p className="mt-2">AI is working...</p></div>;
@@ -1655,7 +1720,7 @@ const AutomationModeSelector = ({ onSelect }) => {
 };
 
 
-const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }) => {
+const FinalPublicationView = ({ publicationText, experimentTitle, experimentId, onRegenerate, showRegenerate = true }) => {
     const { addToast } = useToast();
     const contentRef = useRef(null);
 
@@ -1666,7 +1731,7 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }
         }
     }, [publicationText]);
 
-    const handleDownload = (format: 'md' | 'doc' | 'pdf') => {
+    const handleDownload = (format: 'md' | 'doc' | 'pdf' | 'txt') => {
         if (format === 'pdf') {
             addToast("Preparing a print-friendly view...", "info");
             const printContent = marked(publicationText);
@@ -1716,6 +1781,8 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }
         } else if (format === 'doc') {
             const content = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${experimentTitle}</title></head><body>${marked(publicationText)}</body></html>`;
             blob = new Blob([content], { type: 'application/vnd.ms-word' });
+        } else if (format === 'txt') {
+            blob = new Blob([publicationText], { type: 'text/plain;charset=utf-8' });
         }
 
         if (blob) {
@@ -1733,9 +1800,18 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId }
             <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                 <h5 className="fw-bold mb-0">Publication Draft</h5>
                  <div>
-                     <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => handleDownload('md')}><i className="bi bi-markdown me-1"></i> Download .md</button>
-                     <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => handleDownload('doc')}><i className="bi bi-file-earmark-word me-1"></i> Download .doc</button>
-                     <button className="btn btn-sm btn-outline-secondary" onClick={() => handleDownload('pdf')}><i className="bi bi-file-earmark-pdf me-1"></i> Download .pdf</button>
+                     {showRegenerate && <button className="btn btn-outline-warning me-2" onClick={onRegenerate}><i className="bi bi-arrow-clockwise me-1"></i> Regenerate</button>}
+                     <div className="btn-group">
+                        <button type="button" className="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i className="bi bi-download me-1"></i> Download
+                        </button>
+                        <ul className="dropdown-menu">
+                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('md')}>Markdown (.md)</a></li>
+                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('txt')}>Plain Text (.txt)</a></li>
+                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('doc')}>Word Document (.doc)</a></li>
+                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('pdf')}>PDF (via Print)</a></li>
+                        </ul>
+                    </div>
                  </div>
              </div>
              <hr/>
@@ -1775,7 +1851,8 @@ const PublicationExporter = () => {
             offscreenCanvas.height = 400;
             
             try {
-                const chart = new Chart(offscreenCanvas, { ...config, options: { ...config.options, animation: false, responsive: false } });
+                const styledConfig = ensureChartStyling(config);
+                const chart = new Chart(offscreenCanvas, { ...styledConfig, options: { ...(styledConfig.options || {}), animation: false, responsive: false } });
                 await new Promise(resolve => setTimeout(resolve, 500)); 
                 const dataUrl = chart.toBase64Image();
                 chart.destroy();
@@ -1923,6 +2000,8 @@ const PublicationExporter = () => {
             publicationText={publicationText}
             experimentTitle={activeExperiment.title}
             experimentId={activeExperiment.id}
+            onRegenerate={() => setGenerationState('tuning')}
+            showRegenerate={true}
         />
     );
 
@@ -2104,6 +2183,8 @@ const ProjectCompletionView = () => {
                             publicationText={finalPublication} 
                             experimentTitle={activeExperiment.title}
                             experimentId={activeExperiment.id}
+                            onRegenerate={() => { /* This view is read-only */ }}
+                            showRegenerate={false}
                         />
                     </div>
                 </div>

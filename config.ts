@@ -53,9 +53,21 @@ export interface ToastContextType {
 // --- APPLICATION CONSTANTS ---
 
 export const SCIENTIFIC_FIELDS = [
-    "Biology", "Chemistry", "Physics", "Computer Science", "Medicine",
-    "Environmental Science", "Geology", "Astronomy", "Psychology",
-    "Sociology", "Materials Science", "Engineering"
+    "Physics",
+    "Biology",
+    "Chemistry",
+    "Computer Science",
+    "Medicine",
+    "Engineering",
+    "Materials Science",
+    "Astronomy",
+    "Geology",
+    "Environmental Science",
+    "Psychology",
+    "Sociology",
+    "Economics",
+    "Mathematics",
+    "Neuroscience"
 ] as const;
 
 

@@ -1,9 +1,11 @@
+
 import React from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { WORKFLOW_STEPS } from '../../config';
 import { marked } from 'marked';
 import { FinalPublicationView } from '../steps/PublicationExporter';
 import { useToast } from '../../toast';
+import { DataAnalysisView } from '../common/DataAnalysisView';
 
 export const ProjectCompletionView = () => {
     const { activeExperiment } = useExperiment();
@@ -76,6 +78,24 @@ export const ProjectCompletionView = () => {
                             const summary = data?.summary || data?.output || 'No output for this step.';
                             const hasContent = !!data?.output;
 
+                            const renderBody = () => {
+                                if (!hasContent) return <p>No output for this step.</p>;
+
+                                // For Step 7, try to render the full chart view
+                                if (step.id === 7) {
+                                    try {
+                                        const analysisData = JSON.parse(data.output);
+                                        return <DataAnalysisView analysisData={analysisData} />;
+                                    } catch (e) {
+                                        // Fallback to summary if parsing fails
+                                        return <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(summary) }}></div>;
+                                    }
+                                }
+                                
+                                // For all other steps, render the summary
+                                return <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(summary) }}></div>;
+                            };
+
                             return (
                                 <div className="accordion-item bg-dark" key={step.id}>
                                     <h2 className="accordion-header">
@@ -105,7 +125,7 @@ export const ProjectCompletionView = () => {
                                                     </div>
                                                 </div>
                                             )}
-                                            <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(summary) }}></div>
+                                            {renderBody()}
                                         </div>
                                     </div>
                                 </div>

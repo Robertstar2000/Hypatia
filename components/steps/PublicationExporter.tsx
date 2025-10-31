@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { marked } from 'marked';
 import {
@@ -59,27 +60,38 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
                     const caption = match[2];
     
                     if (chartConfigs[chartIndex]) {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 800;
+                        canvas.height = 450;
+                        document.body.appendChild(canvas);
+                        canvas.style.display = 'none';
+
                         try {
-                            const chartConfig = chartConfigs[chartIndex];
-                            const canvas = document.createElement('canvas');
-                            canvas.width = 800;
-                            canvas.height = 450;
-                            document.body.appendChild(canvas); // Must be in DOM to have size
-                            canvas.style.display = 'none';
-
-                            const styledConfig = ensureChartStyling(chartConfig);
-                            new Chart(canvas, styledConfig);
-                            
-                            await new Promise(resolve => setTimeout(resolve, 500)); // allow render
-                            
-                            const dataUrl = canvas.toDataURL('image/png');
-                            canvas.remove();
-
+                            const dataUrl = await new Promise((resolve, reject) => {
+                                try {
+                                    const chartConfig = chartConfigs[chartIndex];
+                                    const styledConfig = ensureChartStyling(chartConfig);
+        
+                                    // Inject onComplete callback to know when rendering is done
+                                    styledConfig.options.animation = {
+                                        ...(styledConfig.options.animation || {}),
+                                        onComplete: (context) => {
+                                            resolve(context.chart.toBase64Image('image/png'));
+                                        },
+                                    };
+                                    new Chart(canvas, styledConfig);
+                                } catch (e) {
+                                    reject(e);
+                                }
+                            });
+    
                             const imgTag = `<figure style="text-align: center;"><img src="${dataUrl}" alt="${caption}" style="max-width: 80%; height: auto; display: block; margin: 1rem auto;" /><figcaption style="font-size: 0.9em; color: #aaa; margin-top: 0.5em;">${caption}</figcaption></figure>`;
                             processedText = processedText.replace(placeholder, imgTag);
                         } catch (e) {
                              console.error("Chart rendering for placeholder failed:", placeholder, e);
                              processedText = processedText.replace(placeholder, `<p class="text-danger">[Error rendering chart: ${e.message}]</p>`);
+                        } finally {
+                            canvas.remove();
                         }
                     } else {
                          processedText = processedText.replace(placeholder, `<p class="text-warning">[Chart data for placeholder not found.]</p>`);

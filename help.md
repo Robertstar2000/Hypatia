@@ -1,4 +1,3 @@
-
 # Project Hypatia User Manual
 
 Welcome to Project Hypatia! This guide will walk you through everything you need to know to leverage this powerful AI-powered platform for your scientific research.
@@ -160,6 +159,9 @@ After completing Step 10, the project is considered complete and can be accessed
 
 -   **What if the AI gets stuck or gives a bad response?**
     -   You have two options: use the **Regenerate** button with feedback, or simply click the **Edit** button and correct the output yourself. You always have the final say.
+
+-   **Why do the agentic steps (Code Simulator, Data Analyzer) sometimes pause or say "Retrying"?**
+    -   To ensure high-quality results and manage API usage, the AI agents have built-in persistence. When an agent's attempt to write code or analyze data fails, it pauses briefly (a 1-second delay between major attempts) to re-evaluate. If an API call fails (e.g., due to a temporary network issue), the system will automatically retry with an increasing delay (2s, 4s, 8s...). This "agentic stamina" allows the AI to overcome transient errors and solve more complex problems without you needing to intervene.
 
 -   **How long does "Automated Generation" take?**
     -   It can take several minutes. The AI is performing 9 complex steps, including summarizations and agentic workflows, so please be patient.

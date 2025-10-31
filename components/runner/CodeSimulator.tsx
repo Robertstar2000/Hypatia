@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { useToast } from '../../toast';
@@ -118,6 +117,10 @@ export const CodeSimulator = ({ onComplete, context }) => {
         for (let i = 0; i < agenticRun.maxIterations; i++) {
             setAgenticRun(prev => ({ ...prev, iterations: i + 1, logs: [...prev.logs, { agent: 'System', message: `--- Attempt ${i + 1} of ${agenticRun.maxIterations} ---` }] }));
 
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1000)); // 1-second delay between iterations
+            }
+
             try {
                 const result = await executeCodeInWorker(currentCode);
                 if (result.type === 'finish') {
@@ -158,14 +161,30 @@ ${currentCode}
 `;
                 
                 try {
-                    const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: fixPrompt });
-                    const fixedCode = response.text.trim();
+                    let attempts = 0;
+                    let delay = 2000;
+                    let geminiResponse;
+                    let success = false;
+
+                    while (attempts < 5 && !success) {
+                        try {
+                            geminiResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: fixPrompt });
+                            success = true;
+                        } catch (geminiError) {
+                            attempts++;
+                            if (attempts >= 5) throw geminiError;
+                            setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'System', message: `Debugger agent failed to respond. Retrying in ${delay / 1000}s... (Attempt ${attempts}/5)` }] }));
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            delay *= 2;
+                        }
+                    }
+
+                    const fixedCode = geminiResponse.text.trim();
                     currentCode = fixedCode;
-                    setCode(fixedCode);
-                    handleCodeChange(fixedCode);
+                    handleCodeChange(fixedCode); // Update UI and state with the new code
                     setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'Debugger', message: `AI generated a potential fix. Retrying...` }] }));
                 } catch (geminiError) {
-                    const msg = parseGeminiError(geminiError, "AI fix failed.");
+                    const msg = parseGeminiError(geminiError, "AI fix failed after multiple retries.");
                     addToast(msg, 'danger');
                     setAgenticRun(prev => ({ ...prev, status: 'failed', logs: [...prev.logs, { agent: 'System', message: `AI failed to provide a fix: ${msg}` }] }));
                     return;

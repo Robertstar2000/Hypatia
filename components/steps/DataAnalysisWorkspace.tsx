@@ -29,6 +29,22 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
         }
 
         setAgenticRun(prev => ({ ...prev, status: 'running', logs: [], iterations: 0 }));
+
+        const callGeminiWithRetry = async (params, agentName, maxRetries = 5) => {
+            let attempts = 0;
+            let delay = 2000;
+            while (attempts < maxRetries) {
+                try {
+                    return await gemini.models.generateContent(params);
+                } catch (error) {
+                    attempts++;
+                    if (attempts >= maxRetries) throw error;
+                    setAgenticRun(prev => ({...prev, logs: [...prev.logs, { agent: 'System', message: `${agentName} agent failed to respond. Retrying in ${delay / 1000}s... (Attempt ${attempts}/${maxRetries})` }]}));
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2;
+                }
+            }
+        };
         
         let initialGoalSummary = '';
         let initialChartDescription = 'No chart was suggested by the initial analysis.';
@@ -37,17 +53,17 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
             // Part 1a: Get Summary from a simple, robust text-only call
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: 'Performing initial data analysis to find key insights...'}]}));
             const summaryPrompt = `Analyze the following CSV data and provide a detailed summary of the key findings, patterns, and any outliers. The summary should be in Markdown format.\n\nData:\n\`\`\`csv\n${stepData.input}\n\`\`\``;
-            const summaryResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: summaryPrompt});
+            const summaryResponse = await callGeminiWithRetry({model: 'gemini-flash-lite-latest', contents: summaryPrompt}, 'Initial Analyzer');
             initialGoalSummary = summaryResponse.text.trim();
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: 'Initial summary generated.'}]}));
             
             // Part 1b: Get Chart Goal from a simple, robust text-only call
             const chartGoalPrompt = `Based on the following data analysis summary, what is the single best chart to visualize the most important finding? Describe the chart's goal concisely. For example: "A bar chart comparing average values across categories."\n\nSummary:\n${initialGoalSummary}`;
-            const chartGoalResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: chartGoalPrompt});
+            const chartGoalResponse = await callGeminiWithRetry({model: 'gemini-flash-lite-latest', contents: chartGoalPrompt}, 'Goal Setter');
             initialChartDescription = chartGoalResponse.text.trim();
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: `Goal set: ${initialChartDescription}`}]}));
         } catch (error) {
-            addToast(parseGeminiError(error, "Failed during initial analysis phase."), 'danger');
+            addToast(parseGeminiError(error, "Failed during initial analysis phase after multiple retries."), 'danger');
             setAgenticRun(prev => ({ ...prev, status: 'failed' }));
             return;
         }
@@ -57,69 +73,80 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
 
         for (let i = 0; i < agenticRun.maxIterations; i++) {
             setAgenticRun(prev => ({...prev, iterations: i + 1, logs: [...prev.logs, {agent: 'System', message: `--- Iteration ${i+1} ---`}]}));
+            
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1000)); // 1-second delay between iterations
+            }
 
-            // Manager's Turn
-            const managerPrompt = `You are the Manager Agent. Your goal is to get a valid Chart.js configuration that matches this description: "${initialChartDescription}". The raw data is available. The last QA feedback was: "${lastQAFeedback}". Based on this feedback, provide a new, clear, and concise instruction for the Doer agent. Focus on correcting the specific error mentioned in the feedback.`;
-            const managerResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: managerPrompt });
-            const managerInstruction = managerResponse.text;
-            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Manager', message: managerInstruction}]}));
-
-            // Doer's Turn - now with strict schema enforcement
-            const doerPrompt = `You are the Doer. You ONLY generate Chart.js JSON configurations for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". You MUST parse the provided CSV data and use its values to populate the 'data.datasets[0].data' array with numbers. The 'labels' should correspond to the appropriate column in the CSV. The data is: \`\`\`csv\n${csvData}\n\`\`\`. Output ONLY the raw JSON that conforms to the schema.`;
-            const doerResponse = await gemini.models.generateContent({ 
-                model: 'gemini-flash-lite-latest', 
-                contents: doerPrompt,
-                config: {
-                    responseMimeType: 'application/json',
-                    responseSchema: CHART_JS_SCHEMA
-                }
-            });
-            const doerJson = doerResponse.text.trim();
-            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Doer', message: 'Generated new chart configuration.'}]}));
-
-            // QA's Turn
-            let qaPass = false;
-            let parsedConfig;
             try {
-                // Local Programmatic Validation First
-                parsedConfig = JSON.parse(doerJson);
-                 if (!parsedConfig?.data?.datasets || !Array.isArray(parsedConfig.data.datasets) || parsedConfig.data.datasets.length === 0) {
-                    throw new Error("Local validation failed: `data.datasets` array is missing or empty.");
-                }
-                if (!parsedConfig.data.datasets[0].data || !Array.isArray(parsedConfig.data.datasets[0].data) || parsedConfig.data.datasets[0].data.length === 0) {
-                    throw new Error("Local validation failed: `datasets[0].data` array is missing or empty.");
-                }
-                 if (parsedConfig.data.datasets[0].data.some(d => typeof d !== 'number')) {
-                    throw new Error("Local validation failed: `datasets[0].data` contains non-numeric values.");
-                }
-                const canvas = document.createElement('canvas');
-                new Chart(canvas.getContext('2d'), parsedConfig);
-                
-                // If local checks pass, proceed to AI QA
-                const qaPrompt = `You are a strict QA Agent. The goal is: "${initialChartDescription}". The Doer agent produced this Chart.js JSON: \`\`\`json\n${doerJson}\n\`\`\`. Is this a perfect fulfillment of the stated goal? Only set "pass" to true if it is an exact and flawless match. Otherwise, provide concise, actionable feedback on what to change. Your response must be a valid JSON object.`;
-                const qaResponse = await gemini.models.generateContent({ 
+                // Manager's Turn
+                const managerPrompt = `You are the Manager Agent. Your goal is to get a valid Chart.js configuration that matches this description: "${initialChartDescription}". The raw data is available. The last QA feedback was: "${lastQAFeedback}". Based on this feedback, provide a new, clear, and concise instruction for the Doer agent. Focus on correcting the specific error mentioned in the feedback.`;
+                const managerResponse = await callGeminiWithRetry({ model: 'gemini-flash-lite-latest', contents: managerPrompt }, 'Manager');
+                const managerInstruction = managerResponse.text;
+                setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Manager', message: managerInstruction}]}));
+
+                // Doer's Turn - now with strict schema enforcement
+                const doerPrompt = `You are the Doer. You ONLY generate Chart.js JSON configurations for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". You MUST parse the provided CSV data and use its values to populate the 'data.datasets[0].data' array with numbers. The 'labels' should correspond to the appropriate column in the CSV. The data is: \`\`\`csv\n${csvData}\n\`\`\`. Output ONLY the raw JSON that conforms to the schema.`;
+                const doerResponse = await callGeminiWithRetry({ 
                     model: 'gemini-flash-lite-latest', 
-                    contents: qaPrompt, 
+                    contents: doerPrompt,
                     config: {
                         responseMimeType: 'application/json',
-                        responseSchema: QA_AGENT_SCHEMA
-                    } 
-                });
-                const qaResult = JSON.parse(qaResponse.text);
-                qaPass = qaResult.pass;
-                lastQAFeedback = qaResult.feedback;
-            } catch (e) {
-                lastQAFeedback = e.message;
-            }
-            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'QA', message: lastQAFeedback}]}));
+                        responseSchema: CHART_JS_SCHEMA
+                    }
+                }, 'Doer');
+                const doerJson = doerResponse.text.trim();
+                setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Doer', message: 'Generated new chart configuration.'}]}));
 
-            if (qaPass) {
-                const finalOutput = JSON.stringify({ summary: initialGoalSummary, chartSuggestions: [parsedConfig] });
-                const finalStepData = { ...stepData, output: finalOutput };
-                await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
-                setAgenticRun(prev => ({ ...prev, status: 'success' }));
-                addToast("Agentic analysis complete!", "success");
-                return;
+                // QA's Turn
+                let qaPass = false;
+                let parsedConfig;
+                try {
+                    // Local Programmatic Validation First
+                    parsedConfig = JSON.parse(doerJson);
+                    if (!parsedConfig?.data?.datasets || !Array.isArray(parsedConfig.data.datasets) || parsedConfig.data.datasets.length === 0) {
+                        throw new Error("Local validation failed: `data.datasets` array is missing or empty.");
+                    }
+                    if (!parsedConfig.data.datasets[0].data || !Array.isArray(parsedConfig.data.datasets[0].data) || parsedConfig.data.datasets[0].data.length === 0) {
+                        throw new Error("Local validation failed: `datasets[0].data` array is missing or empty.");
+                    }
+                    if (parsedConfig.data.datasets[0].data.some(d => typeof d !== 'number')) {
+                        throw new Error("Local validation failed: `datasets[0].data` contains non-numeric values.");
+                    }
+                    const canvas = document.createElement('canvas');
+                    new Chart(canvas.getContext('2d'), parsedConfig);
+                    
+                    // If local checks pass, proceed to AI QA
+                    const qaPrompt = `You are a strict QA Agent. The goal is: "${initialChartDescription}". The Doer agent produced this Chart.js JSON: \`\`\`json\n${doerJson}\n\`\`\`. Is this a perfect fulfillment of the stated goal? Only set "pass" to true if it is an exact and flawless match. Otherwise, provide concise, actionable feedback on what to change. Your response must be a valid JSON object.`;
+                    const qaResponse = await callGeminiWithRetry({ 
+                        model: 'gemini-flash-lite-latest', 
+                        contents: qaPrompt, 
+                        config: {
+                            responseMimeType: 'application/json',
+                            responseSchema: QA_AGENT_SCHEMA
+                        } 
+                    }, 'QA');
+                    const qaResult = JSON.parse(qaResponse.text);
+                    qaPass = qaResult.pass;
+                    lastQAFeedback = qaResult.feedback;
+                } catch (e) {
+                    lastQAFeedback = e.message;
+                }
+                setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'QA', message: lastQAFeedback}]}));
+
+                if (qaPass) {
+                    const finalOutput = JSON.stringify({ summary: initialGoalSummary, chartSuggestions: [parsedConfig] });
+                    const finalStepData = { ...stepData, output: finalOutput };
+                    await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+                    setAgenticRun(prev => ({ ...prev, status: 'success' }));
+                    addToast("Agentic analysis complete!", "success");
+                    return;
+                }
+            } catch (error) {
+                 const errorMessage = parseGeminiError(error, `Agentic iteration ${i + 1} failed.`);
+                 addToast(errorMessage, 'danger');
+                 lastQAFeedback = `An error occurred in the previous step: ${errorMessage}. Please try a completely different approach.`;
+                 setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: errorMessage}]}));
             }
         }
         

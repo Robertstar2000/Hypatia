@@ -5,20 +5,20 @@ import { HelpModal } from './HelpModal';
 
 export const Header = ({ setView, activeView, onToggleNotebook }) => {
     const [showHelp, setShowHelp] = useState(false);
-    const [readmeContent, setReadmeContent] = useState('');
+    const [helpContent, setHelpContent] = useState('');
     const { gemini } = useExperiment();
 
     useEffect(() => {
-        if (showHelp && !readmeContent) {
-            fetch('./README.md')
+        if (showHelp && !helpContent) {
+            fetch('./help.md')
                 .then(response => response.ok ? response.text() : Promise.reject('Failed to load'))
-                .then(text => setReadmeContent(text))
+                .then(text => setHelpContent(text))
                 .catch(err => {
-                    console.error("Failed to load README.md:", err);
-                    setReadmeContent("# Error\n\nCould not load help content.");
+                    console.error("Failed to load help.md:", err);
+                    setHelpContent("# Error\n\nCould not load help content.");
                 });
         }
-    }, [showHelp, readmeContent]);
+    }, [showHelp, helpContent]);
 
     return (
         <>
@@ -45,18 +45,18 @@ export const Header = ({ setView, activeView, onToggleNotebook }) => {
                                         <i className="bi bi-journal-bookmark-fill me-1"></i> Lab Notebook
                                     </a>
                                 </li>
-                                <li className="nav-item">
-                                    <a className="nav-link" href="#" onClick={() => setShowHelp(true)}>
-                                        <i className="bi bi-question-circle me-1"></i> Help
-                                    </a>
-                                </li>
                                 </>
                             )}
+                             <li className="nav-item">
+                                <a className="nav-link" href="#" onClick={() => setShowHelp(true)}>
+                                    <i className="bi bi-question-circle me-1"></i> Help
+                                </a>
+                            </li>
                         </ul>
                     </div>
                 </div>
             </nav>
-            {showHelp && <HelpModal content={readmeContent} onClose={() => setShowHelp(false)} />}
+            {showHelp && <HelpModal content={helpContent} onClose={() => setShowHelp(false)} />}
         </>
     );
 };

@@ -3,8 +3,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Chart } from 'chart.js';
 import { useExperiment } from '../../context/ExperimentContext';
 import { useToast } from '../../toast';
-import { getStepContext, getPromptForStep, parseGeminiError } from '../../be_gemini';
-import { QA_AGENT_SCHEMA } from '../../config';
+import { getStepContext, parseGeminiError } from '../../be_gemini';
+import { QA_AGENT_SCHEMA, CHART_JS_SCHEMA } from '../../config';
 import { GeneratedOutput } from '../common/GeneratedOutput';
 import { AgenticAnalysisView } from '../common/AgenticAnalysisView';
 
@@ -15,10 +15,8 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     const [agenticRun, setAgenticRun] = useState({
         status: 'idle', // 'idle', 'running', 'success', 'failed'
         iterations: 0,
-        maxIterations: 50,
+        maxIterations: 5,
         logs: [],
-        finalChartConfig: null,
-        finalSummary: ''
     });
 
     const stepData = activeExperiment.stepData[7] || {};
@@ -35,27 +33,20 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
         let initialChartDescription = 'No chart was suggested by the initial analysis.';
 
         try {
-            // Step 1: Get the initial analysis and goal description
-            const context = getStepContext(activeExperiment, 7);
-            const { basePrompt: initialPrompt, config: initialConfig } = getPromptForStep(7, stepData.input || '', context, { isAutomated: true });
-            const initialResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: initialPrompt, config: initialConfig});
+            // Part 1a: Get Summary from a simple, robust text-only call
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: 'Performing initial data analysis to find key insights...'}]}));
+            const summaryPrompt = `Analyze the following CSV data and provide a detailed summary of the key findings, patterns, and any outliers. The summary should be in Markdown format.\n\nData:\n\`\`\`csv\n${stepData.input}\n\`\`\``;
+            const summaryResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: summaryPrompt});
+            initialGoalSummary = summaryResponse.text.trim();
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: 'Initial summary generated.'}]}));
             
-            const initialResult = JSON.parse(initialResponse.text.replace(/```json/g, '').replace(/```/g, '').trim());
-            initialGoalSummary = initialResult.summary;
-            if (initialResult.chartSuggestions && initialResult.chartSuggestions.length > 0) {
-                const chart = initialResult.chartSuggestions[0];
-                // Defensive check to prevent crash on malformed chart object
-                if (chart && chart.type && chart.data && Array.isArray(chart.data.datasets) && chart.data.datasets.length > 0 && chart.data.datasets[0].label) {
-                    initialChartDescription = `Create a '${chart.type}' chart. The dataset label should be '${chart.data.datasets[0].label}'.`;
-                } else if (chart && chart.type) {
-                    initialChartDescription = `Create a '${chart.type}' chart based on the provided data.`;
-                }
-            }
-
+            // Part 1b: Get Chart Goal from a simple, robust text-only call
+            const chartGoalPrompt = `Based on the following data analysis summary, what is the single best chart to visualize the most important finding? Describe the chart's goal concisely. For example: "A bar chart comparing average values across categories."\n\nSummary:\n${initialGoalSummary}`;
+            const chartGoalResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: chartGoalPrompt});
+            initialChartDescription = chartGoalResponse.text.trim();
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: `Goal set: ${initialChartDescription}`}]}));
-
         } catch (error) {
-            addToast(parseGeminiError(error, "Failed to get initial analysis goal."), 'danger');
+            addToast(parseGeminiError(error, "Failed during initial analysis phase."), 'danger');
             setAgenticRun(prev => ({ ...prev, status: 'failed' }));
             return;
         }
@@ -63,22 +54,26 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
         let lastQAFeedback = "No feedback yet. This is the first attempt.";
         const csvData = stepData.input || '';
 
-        const exampleLine = `{"type":"line","data":{"labels":["Jan","Feb"],"datasets":[{"label":"Product A","data":[100,120]},{"label":"Product B","data":[80,90]}]}}`;
-        const exampleBar = `{"type":"bar","data":{"labels":["A","B"],"datasets":[{"label":"Count","data":[10,20]}]}}`;
-
         for (let i = 0; i < agenticRun.maxIterations; i++) {
             setAgenticRun(prev => ({...prev, iterations: i + 1, logs: [...prev.logs, {agent: 'System', message: `--- Iteration ${i+1} ---`}]}));
 
             // Manager's Turn
-            const managerPrompt = `You are the Manager Agent. Your goal is to get a valid Chart.js configuration that matches this description: "${initialChartDescription}". You have examples for bar graphs and line graphs. Bar: ${exampleBar}. Line: ${exampleLine}. The raw data is: \`\`\`csv\n${csvData}\n\`\`\`. The last QA feedback was: "${lastQAFeedback}". Based on this feedback, provide a new, clear, and concise instruction to the Doer agent. Focus on correcting the specific error.`;
+            const managerPrompt = `You are the Manager Agent. Your goal is to get a valid Chart.js configuration that matches this description: "${initialChartDescription}". The raw data is available. The last QA feedback was: "${lastQAFeedback}". Based on this feedback, provide a new, clear, and concise instruction for the Doer agent. Focus on correcting the specific error mentioned in the feedback.`;
             const managerResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: managerPrompt });
             const managerInstruction = managerResponse.text;
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Manager', message: managerInstruction}]}));
 
-            // Doer's Turn
-            const doerPrompt = `You are the Doer. You ONLY generate Chart.js JSON configurations for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". You MUST parse the provided CSV data and use its values to populate the 'data.datasets[0].data' array with numbers. The 'labels' should correspond to the appropriate column in the CSV. The data is: \`\`\`csv\n${csvData}\n\`\`\`. Output ONLY the raw JSON.`;
-            const doerResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: doerPrompt });
-            const doerJson = doerResponse.text.replace(/```json/g, '').replace(/```/g, '').trim();
+            // Doer's Turn - now with strict schema enforcement
+            const doerPrompt = `You are the Doer. You ONLY generate Chart.js JSON configurations for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". You MUST parse the provided CSV data and use its values to populate the 'data.datasets[0].data' array with numbers. The 'labels' should correspond to the appropriate column in the CSV. The data is: \`\`\`csv\n${csvData}\n\`\`\`. Output ONLY the raw JSON that conforms to the schema.`;
+            const doerResponse = await gemini.models.generateContent({ 
+                model: 'gemini-flash-lite-latest', 
+                contents: doerPrompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: CHART_JS_SCHEMA
+                }
+            });
+            const doerJson = doerResponse.text.trim();
             setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Doer', message: 'Generated new chart configuration.'}]}));
 
             // QA's Turn

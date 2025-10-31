@@ -1,12 +1,13 @@
-
 import React from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { WORKFLOW_STEPS } from '../../config';
 import { marked } from 'marked';
 import { FinalPublicationView } from '../steps/PublicationExporter';
+import { useToast } from '../../toast';
 
 export const ProjectCompletionView = () => {
     const { activeExperiment } = useExperiment();
+    const { addToast } = useToast();
     
     const publicationText = activeExperiment?.stepData[10]?.output;
     const stepData = activeExperiment?.stepData;
@@ -14,6 +15,31 @@ export const ProjectCompletionView = () => {
     if (!activeExperiment) {
         return <div>Loading...</div>;
     }
+
+    const handleDownloadStep = (step: { id: number; title: string }, format: 'md' | 'txt') => {
+        if (!activeExperiment) return;
+
+        const content = activeExperiment.stepData[step.id]?.output;
+        if (!content) {
+            addToast('No full content to download for this step.', 'warning');
+            return;
+        }
+
+        const { title: experimentTitle } = activeExperiment;
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const filename = `hypatia_${experimentTitle.replace(/\s+/g, '_')}_step${step.id}_${step.title.replace(/\s+/g, '_')}.${format}`;
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        addToast(`Step ${step.id} content downloaded as .${format}`, 'success');
+    };
     
     return (
         <div className="p-3">
@@ -34,10 +60,8 @@ export const ProjectCompletionView = () => {
             <div className="tab-content" id="completionTabsContent">
                 <div className="tab-pane fade show active p-3" id="paper-tab-pane" role="tabpanel">
                     {publicationText ? (
-                        <FinalPublicationView 
-                            publicationText={publicationText} 
-                            experimentTitle={activeExperiment.title}
-                            experimentId={activeExperiment.id}
+                        <FinalPublicationView
+                            publicationText={publicationText}
                             onRegenerate={() => {}}
                             showRegenerate={false}
                         />
@@ -68,6 +92,19 @@ export const ProjectCompletionView = () => {
                                     </h2>
                                     <div id={`collapse${step.id}`} className="accordion-collapse collapse" data-bs-parent="#projectLogAccordion">
                                         <div className="accordion-body">
+                                            {hasContent && (
+                                                <div className="text-end mb-2">
+                                                    <div className="btn-group">
+                                                        <button type="button" className="btn btn-sm btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                                            <i className="bi bi-download me-1"></i> Download Output
+                                                        </button>
+                                                        <ul className="dropdown-menu dropdown-menu-end">
+                                                            <li><a className="dropdown-item" href="#" onClick={(e) => { e.preventDefault(); handleDownloadStep(step, 'md'); }}>Markdown (.md)</a></li>
+                                                            <li><a className="dropdown-item" href="#" onClick={(e) => { e.preventDefault(); handleDownloadStep(step, 'txt'); }}>Plain Text (.txt)</a></li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(summary) }}></div>
                                         </div>
                                     </div>

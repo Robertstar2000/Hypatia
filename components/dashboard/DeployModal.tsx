@@ -50,7 +50,6 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
             };
             await onUpdateExperiment({ ...experiment, stepData: updatedStepData });
             addToast("Content generated and saved.", "success");
-// FIX: Corrected the invalid `catch (error) =>` syntax to the valid `catch (error)`.
         } catch (error) {
             addToast(parseGeminiError(error, "Failed to generate content."), 'danger');
         } finally {
@@ -158,7 +157,6 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
         </>
     );
 
-    // FIX: Added the missing `return` statement to ensure the component returns a valid JSX element.
     return (
          <div className="modal" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }} tabIndex={-1}>
             <div className="modal-dialog modal-dialog-centered">

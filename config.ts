@@ -46,7 +46,6 @@ export interface ExperimentContextType {
     handleAuthentication: (type: 'promo' | 'key', value: string) => Promise<void>;
 }
 
-// FIX: Add and export ToastContextType, which was missing.
 export interface ToastContextType {
     addToast: (message: string, type?: 'success' | 'danger' | 'warning' | 'info') => void;
 }
@@ -265,6 +264,57 @@ export const STATISTICAL_METHODS_SCHEMA = {
         }
     },
     required: ["methods"]
+};
+
+
+/**
+ * @const CHART_JS_SCHEMA
+ * A strict schema for a single Chart.js configuration object. Used by the "Doer" agent in Step 7.
+ */
+export const CHART_JS_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        type: {
+            type: Type.STRING,
+            description: "The type of chart (must be 'bar' or 'line')."
+        },
+        data: {
+            type: Type.OBJECT,
+            properties: {
+                labels: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                },
+                datasets: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            label: { type: Type.STRING },
+                            data: {
+                                type: Type.ARRAY,
+                                description: "The array of numerical data points for the chart.",
+                                items: { type: Type.NUMBER }
+                            },
+                        },
+                        required: ["label", "data"]
+                    }
+                }
+            },
+            required: ["labels", "datasets"]
+        },
+        options: {
+            type: Type.OBJECT,
+            description: "Optional Chart.js options object.",
+            properties: {
+                responsive: {
+                    type: Type.BOOLEAN,
+                    description: "A boolean to indicate if the chart should be responsive."
+                }
+            }
+        }
+    },
+    required: ["type", "data"]
 };
 
 

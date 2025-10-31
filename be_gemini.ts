@@ -86,7 +86,6 @@ export const testApiKey = async (apiKey: string): Promise<boolean> => {
 };
 
 
-// FIX: Changed return type from `object` to `any` to allow for accessing dynamically added properties without TypeScript errors.
 export const getStepContext = (experiment: Experiment, stepId: number): any => {
     const context: any = { experimentField: experiment.field };
     const data = experiment.stepData || {};
@@ -111,7 +110,9 @@ export const getStepContext = (experiment: Experiment, stepId: number): any => {
         for (let i = 1; i < Math.min(stepId, 10); i++) { // Only loop through the 10 main steps
             const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
             if (stepInfo) {
-                let output = (stepId - i <= 2) ? getFullOutput(i) : getStepSummary(i);
+                // Use full output for Step 2 (Lit Review for references) and other recent steps.
+                let output = (i === 2 || stepId - i <= 2) ? getFullOutput(i) : getStepSummary(i);
+                
                 if (i === 7 && data[7]?.output) {
                      output += "\n[Note: Data visualizations were generated during this step.]";
                 }
@@ -245,7 +246,9 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
             basePrompt += `You are a peer reviewer. Your task is to conduct a thorough and constructive review of the entire research project, summarized below. Analyze the project for clarity, scientific rigor, logical consistency between steps, and the strength of the final conclusion.\n\nHere is the summarized project log:\n\n${context.full_project_summary_log}`;
             break;
         case 10:
-            basePrompt += `You are an expert scientific writer tasked with drafting a publication-ready paper for an audience of experts in **${context.experimentField}**. Use appropriate, professional terminology.\n\nYou must rewrite and synthesize the entire research project log into a cohesive scientific paper in Markdown format. The paper must include the standard sections: Abstract, Introduction, Methods, Results, Discussion, and Conclusion.\n\n**Key instructions:**\n1.  **Rewrite, Don't Copy:** Re-author the content from the project log into a formal academic voice.\n2.  **Incorporate Context:** When writing, you MUST integrate context from the entire project log provided.\n3.  **Placeholders for Charts:** In the 'Results' section, where appropriate, you MUST insert placeholders for data visualizations. Use the format [CHART_1: A descriptive caption], [CHART_2: Another caption], etc. Refer to the data analysis summary to create relevant captions.\n4.  **Address Peer Review:** In the Discussion section, you MUST address the points raised in the simulated peer review.\n\nHere is the summarized project log you must use as your source material:\n\n${context.full_project_summary_log}`;
+            // This step is now handled by the dedicated runPublicationAgent workflow.
+            // This prompt is a fallback in case it's called directly, but it shouldn't be.
+            basePrompt += `Assemble the project log into a publication. Log: ${context.full_project_summary_log}`;
             break;
         case 11: // Virtual step for Submission Checklist
              basePrompt += `Based on the following research project summary log, generate a comprehensive pre-submission checklist for a high-impact journal in the field of ${context.experimentField}. The checklist should be in Markdown format and cover key areas like formatting, authorship, data availability statements, conflict of interest declarations, and ethical considerations.\n\nProject Log:\n${context.full_project_summary_log}`;
@@ -258,4 +261,91 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
     }
 
     return { basePrompt, expectJson, config };
+};
+
+/**
+ * Executes a multi-agent workflow to generate a complete scientific paper.
+ * @param {object} params - The parameters for the agent.
+ * @param {Experiment} params.experiment - The active experiment object.
+ * @param {GoogleGenAI} params.gemini - The initialized Gemini client.
+ * @param {(agent: string, message: string) => void} params.updateLog - Callback to send log updates to the UI.
+ * @returns {Promise<string>} The final, formatted publication text in Markdown.
+ */
+export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
+    // 1. Get full context
+    const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
+    updateLog('System', 'Project context compiled.');
+
+    // 2. Outline
+    const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
+    const outlineResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: outlinePrompt });
+    let sections;
+    try {
+      sections = JSON.parse(outlineResponse.text.replace(/```json/g, '').replace(/```/g, ''));
+    } catch {
+      sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"];
+    }
+    updateLog('Manager', `Paper outline confirmed: ${sections.join(', ')}`);
+    
+    let paper = '';
+
+    // 3. Write sections
+    for (const section of sections) {
+        if (section.toLowerCase() === 'references') continue; // Handle this specifically later
+        
+        updateLog('Writer', `Drafting ${section}...`);
+        
+        let sectionPrompt;
+        if (section.toLowerCase() === "results") {
+            const analysisSummary = getStepContext(experiment, 7).analysis_summary;
+            const chartCount = JSON.parse(experiment.stepData[7]?.output || '{}').chartSuggestions?.length || 0;
+            sectionPrompt = `Write the "${section}" section. Describe the findings from this analysis summary: "${analysisSummary}". Crucially, if there are charts to include (${chartCount} of them), you MUST insert placeholders for them where appropriate in the text. Use the format [CHART_1], [CHART_2], etc.`;
+        } else {
+             sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
+        }
+        
+        const sectionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: sectionPrompt });
+        paper += `\n## ${section}\n\n${sectionResponse.text}\n`;
+        updateLog('Writer', `${section} section complete.`);
+    }
+
+    // 4. Generate captions and create final placeholders
+    const analysisData = JSON.parse(experiment.stepData[7]?.output || '{}');
+    const chartConfigs = analysisData.chartSuggestions || [];
+    if (chartConfigs.length > 0) {
+        updateLog('System', 'Generating chart captions...');
+        for (let i = 0; i < chartConfigs.length; i++) {
+            const captionPrompt = `Write a descriptive caption for a scientific chart. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartConfigs[i].type} chart titled "${chartConfigs[i].data.datasets[0].label}".`;
+            const captionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: captionPrompt });
+            const caption = captionResponse.text;
+            const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
+            paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
+        }
+        updateLog('System', 'Captions generated and embedded.');
+    }
+    
+    // 5. Format References
+    const litReviewOutput = experiment.stepData[2]?.output;
+    if (litReviewOutput) {
+        try {
+            const refs = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '')).references;
+            if (refs && refs.length > 0) {
+                 updateLog('System', 'Formatting references...');
+                const refsPrompt = `Format the following JSON reference list into a standard APA-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
+                const refsResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: refsPrompt });
+                paper += `\n## References\n\n${refsResponse.text}`;
+                updateLog('System', 'References section complete.');
+            }
+        } catch (e) {
+            updateLog('System', 'Warning: Could not parse references from literature review step.');
+        }
+    }
+
+    // 6. Final Polish
+    updateLog('Editor', 'Performing final editorial review...');
+    const polishPrompt = `You are an editor. Review the following paper for flow, consistency, and grammar. Add a title based on the content (as a Level 1 Markdown Header: # Title). Output the final, polished version in Markdown.\n\n${paper}`;
+    const finalResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: polishPrompt });
+    updateLog('System', 'Publication ready.');
+    
+    return finalResponse.text;
 };

@@ -1,8 +1,9 @@
 
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { useToast } from '../../toast';
-import { parseGeminiError, getStepContext, getPromptForStep } from '../../be_gemini';
+import { parseGeminiError, getStepContext, getPromptForStep, runPublicationAgent } from '../../be_gemini';
 import { WORKFLOW_STEPS } from '../../config';
 
 import { ExperimentRunner } from '../runner/ExperimentRunner';
@@ -57,7 +58,12 @@ export const ExperimentWorkspace = () => {
                 let resultText;
                 let currentStepData = { ...(currentExp.stepData[i] || {}) };
 
-                if (i === 6) {
+                if (i === 10) {
+                     const dummyLog = (agent: string, msg: string) => console.log(`[AutoRun Step 10] ${agent}: ${msg}`);
+                     resultText = await runPublicationAgent({ experiment: currentExp, gemini, updateLog: dummyLog });
+                     currentStepData = { ...currentStepData, output: resultText };
+
+                } else if (i === 6) {
                     const context = getStepContext(currentExp, 6);
                     const { basePrompt, config } = getPromptForStep(6, '', context, {});
                     const response = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: basePrompt, config});

@@ -7,7 +7,6 @@ interface ToastProviderProps {
     children: React.ReactNode;
 }
 
-// Fix: Explicitly typing as React.FC resolves a TypeScript error where the 'children' prop was not being correctly inferred at the usage site.
 export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
     const [toasts, setToasts] = useState([]);
 

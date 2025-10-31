@@ -1,8 +1,34 @@
-
 import React, { useRef, useEffect } from 'react';
-import { Chart } from 'chart.js';
+import {
+    Chart,
+    LineController,
+    BarController,
+    LineElement,
+    BarElement,
+    PointElement,
+    CategoryScale,
+    LinearScale,
+    Legend,
+    Tooltip,
+    Title
+} from 'chart.js';
 import { marked } from 'marked';
 import { ensureChartStyling } from '../../utils/chartUtils';
+
+// Register all the necessary components for Chart.js
+Chart.register(
+    LineController,
+    BarController,
+    LineElement,
+    BarElement,
+    PointElement,
+    CategoryScale,
+    LinearScale,
+    Legend,
+    Tooltip,
+    Title
+);
+
 
 /**
  * @component DataAnalysisView

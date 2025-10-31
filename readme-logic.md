@@ -33,23 +33,29 @@ This document outlines the logical flow of the Project Hypatia application in a 
 
 #### A. API Key Section (`ApiKeySection`)
 
--   This component has a single responsibility: to obtain and validate a user-provided Google Gemini API key.
--   The previous "Promo Code" functionality has been **removed** for security and simplicity.
--   **On "Validate & Use Key" click:**
-    -   It calls the `testApiKey` service function, which makes a minimal, low-cost API call to check for authentication errors.
-    -   **On success:** The Gemini service is initialized with the valid key, and the main application UI is unlocked for the user.
-    -   **On failure:** A specific error toast is displayed (e.g., "API Key is not valid").
+-   This component provides two methods for authenticating with the Gemini API:
+    -   **API Key**: The primary method where users enter their personal Google Gemini API key.
+    -   **Promo Code**: A secondary method for demonstration. Entering the code `MTI` allows the application to use a session-based key.
+-   **On "Unlock Hypatia" click:**
+    -   It calls the `handleAuthentication` function in the `App` component with the appropriate type (`'key'` or `'promo'`).
+    -   This function then validates the access method and initializes the Gemini service.
+    -   **On success:** The main application UI is unlocked.
+    -   **On failure:** A specific error toast is displayed.
 
 #### B. Experiment Workspace (`ExperimentWorkspace`)
 
 -   This is the core multi-step interface for a single experiment, consuming data from the `ExperimentContext`.
+-   **Automation Mode:**
+    -   After Step 1 is complete, if an `automationMode` has not been set, the `AutomationModeSelector` is displayed.
+    -   The user chooses between `'manual'` or `'automated'`. This choice is saved to the experiment.
+    -   If `'automated'` is chosen, the `runAutomationSequence` function is triggered, which loops through all remaining steps, calling the AI to generate, summarize, and save each one until the project is complete.
 -   **Sidebar Navigation:**
     -   Loops through all 10 `WORKFLOW_STEPS`.
     -   Highlights the `activeStep`, disables future steps, and shows a checkmark for completed steps.
 -   **"Generate" Button Logic:**
-    -   Gathers context from previous steps using `getStepContext`. This function now uses concise, AI-generated summaries of past steps instead of the full text, making the process much more efficient.
+    -   Gathers context from previous steps using `getStepContext`. This function uses concise, AI-generated summaries of past steps instead of the full text, making the process much more efficient.
     -   Constructs the final prompt using `getPromptForStep`.
-    -   Calls the Gemini API's streaming endpoint, updating the UI in real-time as the response arrives.
+    -   Calls the Gemini API's streaming endpoint (for text) or standard endpoint (for JSON), updating the UI in real-time as the response arrives.
     -   Saves the final output to the database.
 -   **"Complete Step & Continue" Button Logic:**
     -   A new, crucial step has been added for efficiency:
@@ -59,25 +65,60 @@ This document outlines the logical flow of the Project Hypatia application in a 
     -   Only after the summary is saved does it increment the experiment's `currentStep`, save the experiment, and advance the user to the next step.
 -   **Special Step Rendering:**
     -   **If `activeStep` is 6:** Renders the `ExperimentRunner` component.
-    -   **If `activeStep` is 10:** Renders the `PublicationExporter` component.
+    -   **If `activeStep` is 7:** Renders the `DataAnalysisWorkspace` component, which kicks off an agentic workflow.
+    -   **If `activeStep` is 10:** Renders the `PublicationExporter` component, which also uses an agentic workflow.
 
 #### C. AI Output Display (`GeneratedOutput`)
 
 -   Renders AI-generated Markdown into styled HTML.
 -   Provides an "Edit" button to allow users to modify and save the AI's output.
--   **Special Logic for Step 7 (Data Analyzer):**
-    -   It attempts to parse the AI's output as JSON according to a strict schema.
-    -   **On success,** it renders the summary text and uses the `chartSuggestions` data to create interactive charts with Chart.js.
-    -   **On failure,** it displays a detailed error message explaining that the AI's response was not in the correct format.
+-   **Special Logic for JSON Steps (1, 2, 7):**
+    -   It attempts to parse the AI's output as JSON according to a strict schema for that step.
+    -   **On success,** it renders the appropriate custom component (e.g., `UniquenessMeter`, `DataAnalysisView` with charts, `ReferenceList`).
+    -   **On failure,** it displays an error message and the raw text output, ensuring the user is never stuck.
 
-#### D. Experiment Runner (Step 6) (`ExperimentRunner`)
+#### D. Agentic Code Simulator (Step 6) (`CodeSimulator`)
 
--   A multi-modal component for data generation.
--   **If "Code Simulation" is chosen:**
-    -   **Secure Execution:** The AI-generated JavaScript is no longer run in the main browser thread. It is now executed inside a **sandboxed Web Worker**. This is a major security improvement, as it isolates the code from the application's UI and data, preventing potential security risks.
-    -   The main application communicates with the worker via a message-passing system to run the code and receive back logs, errors, or the final `hypatia.finish(csv, summary)` result.
--   **If "Manual Entry" is chosen:** The AI generates a dynamic data entry table based on the user's data collection plan.
--   **If "AI Synthesis" is chosen:** The AI generates a complete, plausible dataset based on the project's context.
+-   This component manages the AI-generated code experiment.
+-   **Secure Execution:** AI-generated JavaScript is executed inside a **sandboxed Web Worker**. This isolates the code from the application's UI and data, preventing security risks.
+-   **Agentic Debugging Loop (`runAgenticSimulation`):**
+    1.  The user clicks "Start Agentic Simulation."
+    2.  The current code is sent to the Web Worker for execution.
+    3.  **If the code runs successfully and calls `hypatia.finish(csv, summary)`:** The loop terminates, and the data is passed to the next step.
+    4.  **If the code throws a runtime error:**
+        -   The error message is captured.
+        -   A **Debugger Agent** (a specialized Gemini prompt) is invoked. The prompt includes the full code, the specific error message, and the experiment's scientific context.
+        -   The agent's goal is to analyze the error and provide a corrected version of the full script.
+        -   The new, "fixed" code replaces the old code in the editor.
+        -   The loop returns to step 2, and the process repeats.
+    5.  This continues until the code succeeds or a maximum number of attempts is reached.
+
+#### E. Agentic Data Analyzer (Step 7) (`DataAnalysisWorkspace`)
+
+-   When this component mounts, it automatically triggers the `performAgenticAnalysis` workflow if no output exists.
+-   **Agent Workflow:**
+    1.  **System Agent:** Performs an initial, robust text-only analysis of the raw CSV data to generate a high-quality summary and determine the single most important insight to visualize.
+    2.  **Manager Agent:** Sets the overall goal (e.g., "Create a bar chart comparing categories").
+    3.  **Loop (Doer -> QA):**
+        -   **Doer Agent:** Receives instructions from the Manager (and feedback from the QA). Its sole job is to generate a Chart.js JSON object that strictly adheres to a predefined schema.
+        -   **QA Agent:** Receives the Doer's JSON. It performs two checks:
+            a.  **Programmatic Validation:** Does the JSON parse correctly? Does it have the required keys? Can it be rendered by Chart.js without throwing an error?
+            b.  **AI Validation:** Does the chart accurately represent the data and fulfill the Manager's original goal?
+        -   The QA agent outputs a `pass: boolean` and `feedback: string`.
+    4.  If `pass` is `false`, the feedback is sent back to the Manager to start the next iteration. If `true`, the loop terminates.
+    5.  The final, validated chart JSON and the initial summary are saved as the step's output.
+
+#### F. Agentic Publication Exporter (Step 10) (`PublicationExporter`)
+
+-   When the user clicks "Generate Publication," the `runPublicationAgent` workflow is triggered.
+-   **Agent Workflow:**
+    1.  **System Agent:** Compiles all context from the entire project into a single log.
+    2.  **Manager Agent:** Analyzes the log and creates a structural outline for a scientific paper (e.g., ["Abstract", "Introduction", "Methods", "Results"...]).
+    3.  **Writer Agent:** Iterates through the outline. For each section, it writes the content, focusing on the relevant parts of the project log. For the "Results" section, it inserts simple placeholders (e.g., `[CHART_1]`) where visualizations should go.
+    4.  **System Agent:** Generates a descriptive caption for each chart from Step 7. It then finds the simple placeholders in the text and replaces them with a more complex placeholder that includes the full caption (e.g., `[CHART_1:Figure 1: This chart shows...]`).
+    5.  **System Agent:** Finds the structured reference data from Step 2 and formats it into a proper bibliography.
+    6.  **Editor Agent:** Performs a final review of the entire document for grammar, flow, and consistency. It also adds a title.
+    7.  The final, polished Markdown document is saved as the step's output. The `FinalPublicationView` component then renders this Markdown, replacing the chart placeholders with actual PNG images of the charts.
 
 ---
 
@@ -87,20 +128,20 @@ This version of the application addresses several key problems from the initial 
 
 -   **1. Context Window Optimization:**
     -   **Problem:** Large prompts in late steps were inefficient and costly.
-    -   **Solution:** Implemented on-the-fly summarization. Upon step completion, the AI generates a concise summary of the output, which is stored. The `getStepContext` function now uses these summaries for context, dramatically reducing token usage and improving performance.
+    -   **Solution:** Implemented on-the-fly summarization. Upon step completion, the AI generates a concise summary of the output, which is stored. The `getStepContext` function now uses these summaries for context, dramatically reducing token usage.
 
--   **2. Secure Code Execution:**
-    -   **Problem:** Using `new Function()` in the main thread for the code simulator was a potential security risk.
-    -   **Solution:** The code simulator now executes JavaScript in a sandboxed Web Worker. This isolates the code from the main application's DOM and global scope, providing a much safer execution environment.
+-   **2. Secure and Robust Code Execution:**
+    -   **Problem:** Using `new Function()` was a potential security risk, and code errors would halt progress.
+    -   **Solution:** The code simulator now executes JavaScript in a sandboxed **Web Worker**. Furthermore, an **agentic debugging loop** automatically detects, analyzes, and attempts to fix runtime errors, significantly improving the success rate of AI-generated code.
 
--   **3. Simplified & Secure Authentication:**
-    -   **Problem:** The hardcoded "promo code" was insecure and not scalable.
-    -   **Solution:** The promo code system has been completely removed. The application now exclusively uses a user-provided API key, which is a more standard and secure approach.
+-   **3. Clear Authentication Methods:**
+    -   **Problem:** A demo or trial mode was needed without requiring every user to immediately generate an API key.
+    -   **Solution:** The application offers two clear authentication paths: a primary API key method and a secondary "promo code" (`MTI`) option for quick demos.
 
 -   **4. Improved State Management:**
-    -   **Problem:** "Prop drilling" (passing state down through many component layers) made the code complex and hard to maintain.
-    -   **Solution:** The application has been refactored to use React's Context API (`ExperimentContext`). Core application state and update functions are now provided through this central context, simplifying components and making data flow clearer.
+    -   **Problem:** "Prop drilling" made the code complex and hard to maintain.
+    -   **Solution:** The application has been refactored to use React's Context API (`ExperimentContext`), simplifying components and making data flow clearer.
 
 -   **5. Enhanced Error Handling:**
-    -   **Problem:** API error messages were generic and unhelpful for troubleshooting.
-    -   **Solution:** Implemented more specific error handling. The app now inspects API error responses to provide users with actionable feedback (e.g., "API Key is invalid," "A network error occurred," "The model is currently overloaded, please try again.").
+    -   **Problem:** API error messages were generic and unhelpful.
+    -   **Solution:** Implemented more specific error handling (`parseGeminiError`) that provides users with actionable feedback.

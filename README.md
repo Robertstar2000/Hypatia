@@ -30,9 +30,10 @@
 - [Technology Stack](#technology-stack)
 - [Getting Started](#getting-started)
 - [Usage Guide](#usage-guide)
-  - [The 10-Step Workflow](#1-the-10-step-workflow)
-  - [Fine-Tuning the AI](#2-fine-tuning-the-ai)
-  - [The Experiment Runner (Step 6)](#3-the-experiment-runner-step-6)
+  - [1. Choosing Your Workflow: Manual vs. Automated](#1-choosing-your-workflow-manual-vs-automated)
+  - [2. The 10-Step Workflow](#2-the-10-step-workflow)
+  - [3. Fine-Tuning the AI](#3-fine-tuning-the-ai)
+  - [4. The Experiment Runner (Step 6)](#4-the-experiment-runner-step-6)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -47,20 +48,19 @@ Project Hypatia is your digital lab partner, an AI-powered platform designed to 
 ## Key Features
 
 -   ✅ **Local-First Storage**: All project data is stored directly in your browser's **IndexedDB via Dexie.js**—no backend, no sign-ups, no data leaves your machine.
--   🗂️ **Project Dashboard**: A central hub to create, view, and manage all your research projects.
+-   🗂️ **Project Dashboard**: A central hub to create, view, manage, archive, and deploy all your research projects.
+-   🤖 **Powerful Agentic Workflows**: For key steps, teams of AI agents collaborate to produce high-quality results:
+    -   **Agentic Debugger (Step 6)**: An AI writes, runs, and automatically debugs simulation code to ensure it executes successfully.
+    -   **Agentic Data Analyst (Step 7)**: A Manager, Doer, and QA agent team work together to determine the best analysis, generate valid charts, and provide a summary.
+    -   **Agentic Publication Writer (Step 10)**: An AI team outlines your paper, writes each section, generates chart captions, formats a bibliography, and performs a final editorial review.
+-   🕹️ **Dual Workflow Modes**: Choose between **Manual Control** for step-by-step oversight or **Automated Generation** to let the AI complete the entire project from a starting point.
 -   🗺️ **Guided 10-Step Workflow**: A structured path from idea to publication, with each step contextually building upon the previous ones.
 -   ⚙️ **Fine-Tune AI Parameters**: On a per-step basis, adjust AI settings like a peer reviewer's persona, the level of detail in a methodology, or the novelty of a hypothesis.
 -   ✏️ **Editable Outputs**: All AI-generated text can be edited and saved, giving you full control over the research narrative.
--   🔬 **Multi-Modal Experimentation (Step 6)**: A versatile experimental hub with five distinct modes for data generation:
-    -   **Upload Your Data**: Directly upload your own dataset in CSV format.
-    -   **External Simulation (Google Colab)**: Use powerful external notebooks for complex experiments and then upload the results.
-    -   **AI-Generated Code Simulation**: The AI writes a starting JavaScript simulation based on your plan, which you can run, edit, and debug.
-    -   **Dynamic Manual Data Entry**: The AI generates a custom data-entry table based on your data collection plan for easy manual input.
-    -   **AI-Powered Data Synthesis**: For conceptual testing, the AI can estimate and generate a complete, plausible dataset.
+-   🔬 **Multi-Modal Experimentation (Step 6)**: A versatile experimental hub with five distinct modes for data generation, including the powerful agentic code simulator.
 -   🧠 **Advanced AI Integration**:
     -   **Google Search Grounding**: The Literature Review step uses Google Search to provide up-to-date, cited sources with URLs.
-    -   **AI-Powered Debugging**: The code simulator includes an "Auto-Fix with AI" button to help resolve runtime errors.
-    -   **JSON Mode & Live Charts**: The Data Analyzer uses a strict JSON schema and Chart.js to create live data visualizations.
+    -   **JSON Mode & Live Charts**: The agentic Data Analyzer uses a strict JSON schema and Chart.js to create live data visualizations.
     -   **Streaming Responses**: AI text streams in token-by-token for a responsive and engaging UI.
 -   📚 **In-App Documentation**: This complete user manual is accessible from any screen in the app via the help icon.
 
@@ -71,7 +71,7 @@ Project Hypatia is your digital lab partner, an AI-powered platform designed to 
 Project Hypatia is built on the principle of the **Human-Mediated Agentic Process (HMAP)**. This is a framework for human-AI collaboration that emphasizes human agency and control throughout the research lifecycle.
 
 -   **Human as the Director**: You are the principal investigator. The AI is your highly capable, but subordinate, research assistant. It suggests, drafts, and analyzes, but you make the final decisions.
--   **AI as the Agent**: The AI agent (Gemini) executes complex tasks based on your instructions. This includes literature searches, hypothesis generation, data synthesis, and drafting content.
+-   **AI as the Agent**: The AI agent (Gemini) executes complex tasks based on your instructions. This includes literature searches, hypothesis generation, data synthesis, and drafting content. In advanced steps, multiple agents collaborate to achieve a goal.
 -   **Mediation as the Interface**: The Hypatia application is the "mediation" layer. It structures the interaction, provides tools for control (like fine-tuning and editing), and ensures the workflow remains logical and scientifically rigorous.
 
 HMAP is not about letting an AI run the entire research process. It's about augmenting human intellect and creativity by offloading the tedious and time-consuming aspects of research to an AI partner, freeing you up to focus on critical thinking, interpretation, and discovery.
@@ -85,14 +85,14 @@ The traditional scientific method is a systematic process for inquiry. Project H
 | Scientific Method Stage | Corresponding Hypatia Step(s)                                   | How Hypatia Enhances It                                                                                               |
 | :---------------------- | :-------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
 | **Observation/Idea**      | `Dashboard` (Create Research Project)                           | Provides a structured way to capture and describe your initial idea.                                                  |
-| **Research Question**   | **1.** Research Question                                        | AI helps refine a broad idea into a specific, testable question.                                                      |
-| **Background Research** | **2.** Literature Review                                        | Uses **Google Search grounding** for up-to-date, relevant sources and summarizes them with citations to identify gaps in existing knowledge.      |
+| **Research Question**   | **1.** Research Question                                        | AI helps refine a broad idea into a specific, testable question and scores its uniqueness.                            |
+| **Background Research** | **2.** Literature Review                                        | Uses **Google Search grounding** for up-to-date, relevant sources and summarizes them with citations to identify gaps. |
 | **Hypothesis**          | **3.** Hypothesis Formulation                                   | AI generates multiple, diverse hypotheses based on the literature, which you can then select or refine.               |
 | **Experiment Design**   | **4.** Methodology Design & **5.** Data Collection Plan         | AI drafts a detailed, step-by-step experimental protocol and a corresponding data collection plan for you to approve. |
-| **Experimentation**     | **6.** Experiment Runner / Data Synthesis                       | A flexible environment to generate data via AI-written code simulation, dynamic manual entry, or direct AI synthesis. |
-| **Data Analysis**       | **7.** Data Analyzer                                            | AI performs statistical analysis on your data, providing a summary and interactive visualizations.                    |
+| **Experimentation**     | **6.** Experiment Runner / Data Synthesis                       | A flexible environment to generate data. Features an **agentic code simulator** that writes, runs, and debugs experiments automatically. |
+| **Data Analysis**       | **7.** Data Analyzer                                            | An **AI agent team** analyzes your data, determines the best charts, validates them, and provides a summary with visualizations. |
 | **Conclusion**          | **8.** Conclusion Drawing                                       | AI helps you interpret the results, state whether the hypothesis was supported, and discuss implications.             |
-| **Communication**       | **9.** Peer Review Simulation & **10.** Publication Exporter | AI simulates a critical peer review to strengthen your arguments and then assembles the entire project into a draft paper. |
+| **Communication**       | **9.** Peer Review Simulation & **10.** Publication Exporter | AI simulates a critical peer review to strengthen your arguments, then an **AI agent team** assembles the entire project into a publication draft with embedded charts and a bibliography. |
 
 ---
 
@@ -102,7 +102,7 @@ This project is built with modern, accessible web technologies.
 
 -   **Frontend**: [React](https://react.dev/) (v19), HTML5, CSS3
 -   **Styling**: [Bootstrap 5.3](https://getbootstrap.com/) & [Bootstrap Icons](https://icons.getbootstrap.com/)
--   **AI**: [Google Gemini API](https://ai.google.dev/) (`gemini-2.5-flash`)
+-   **AI**: [Google Gemini API](https://ai.google.dev/) (`gemini-2.5-flash` & `gemini-flash-lite-latest`)
 -   **Charts**: [Chart.js](https://www.chartjs.org/)
 -   **Client-Side Storage**: [Dexie.js](https://dexie.org/) (IndexedDB Wrapper)
 -   **Markdown Rendering**: `marked` library
@@ -115,7 +115,10 @@ To get a local copy up and running, simply follow these steps.
 
 1.  **Download Files**: Download the repository files (`index.html`, `index.tsx`, `README.md`, etc.).
 2.  **Open in Browser**: Open the `index.html` file in a modern web browser (like Chrome, Firefox, or Edge).
-3.  **Provide API Key**: Upon loading, the application will prompt you for API access. This is required for the AI features to function. You can provide your own free Google Gemini API key, which you can get from [Google AI Studio](https://aistudio.google.com/app/apikey).
+3.  **Provide API Access**: Upon loading, the application will prompt you for API access. You have two options:
+    -   **API Key (Recommended)**: Provide your own free Google Gemini API key, which you can get from [Google AI Studio](https://aistudio.google.com/app/apikey).
+    -   **Promo Code**: For demonstration purposes, you can use the promo code `MTI` to use the application with a pre-configured, session-based API key.
+
     *Security Note*: Your API key is stored in memory for the duration of your session and is never saved or sent to any server besides Google's API endpoints.
 4.  **Begin Research**: Once authenticated, you can start creating your first research project!
 
@@ -123,64 +126,48 @@ To get a local copy up and running, simply follow these steps.
 
 ## Usage Guide
 
-### 1. The 10-Step Workflow
+### 1. Choosing Your Workflow: Manual vs. Automated
 
-When you open the app, you start on the landing page and can navigate to the **Dashboard**. From there, you can create a new research project or select an existing one. This will take you to the main workspace, which guides you through the scientific method. The AI's output at each step informs the next, creating a cohesive research narrative.
+After completing Step 1 (Research Question), you will be prompted to choose a workflow mode. This is a critical decision that shapes how you interact with the AI for the rest of the project.
+
+-   **Manual Control**: This is the standard, recommended mode for detailed research. You will proceed step-by-step, generating, reviewing, editing, and approving the AI's output at each stage. This mode gives you maximum control and is ideal when you are providing your own data or need to guide the AI's logic carefully.
+
+-   **Automated Generation**: In this mode, the AI takes over and completes all remaining steps (2 through 10) in one continuous process. It will synthesize its own data in Step 6 and build the entire research project based on its best judgment. This mode is excellent for educational purposes, rapid ideation, or exploring what a full research arc on a topic might look like. *Please be patient, as this process can take several minutes.*
+
+### 2. The 10-Step Workflow
+
+When you open the app, you start on the landing page and can navigate to the **Dashboard**. From there, you can create a new research project or select an existing one. This will take you to the main workspace. If you choose "Manual Control," you will progress through the steps one by one. The AI's output at each step informs the next, creating a cohesive research narrative.
 
 **Full Control**: You have full control over the AI's output.
 -   On any step where text has been generated, you will see an **<i class="bi bi-pencil-square"></i> Edit** button.
 -   Clicking it turns the text into an editable field. Make your changes and click the **<i class="bi bi-check-lg"></i> Save** button.
 -   Your saved version becomes the new "official" output for that step and will be used to provide context for all future AI generations.
 
-### 2. Fine-Tuning the AI
+### 3. Fine-Tuning the AI
 
 In each step of the workspace, you can click the **<i class="bi bi-sliders"></i> Fine-Tune AI** button. This opens a modal with parameters specific to that step, allowing you to guide the AI's behavior more precisely. For example, you can change the persona of the peer reviewer in Step 9, demand a more detailed methodology in Step 4, or ask for more novel hypotheses in Step 3.
 
-### 3. The Experiment Runner (Step 6)
+### 4. The Experiment Runner (Step 6)
 
 This step is a powerful, multi-modal hub for generating your experimental data. You will be prompted to choose one of five methods:
 
 **A) Upload Your Data**
--   The most straightforward option. If you have already conducted your experiment and have a dataset, you can directly upload it.
--   The application accepts data in CSV (Comma-Separated Values) format.
--   This is also the method you'll use to import results from an external simulation run in tools like Google Colab.
+-   The most straightforward option. If you have already conducted your experiment and have a dataset, you can directly upload it in CSV format.
 
 **B) External Simulation (Google Colab)**
--   For complex experiments that require more computational power or specific Python libraries, you can use Google Colab.
--   The app provides a direct link to open Colab and instructions for connecting it to a web application using Anvil, a framework that turns notebooks into web services.
--   **Setup Template:**
-    1.  In your Anvil web app, enable the "Server Uplink" service to get an Uplink key.
-    2.  In your Colab notebook, install the `anvil-uplink` library: `!pip install anvil-uplink`.
-    3.  Connect your notebook to Anvil: `import anvil.server; anvil.server.connect("YOUR_UPLINK_KEY")`.
-    4.  You can then call functions defined in your Colab notebook from your Anvil web app.
--   Once your simulation is complete, export your data as a CSV and use the **Upload Your Data** option to bring it into Project Hypatia for analysis.
+-   For complex experiments, you can use external tools like Google Colab. Once your simulation is complete, export your data as a CSV and use the **Upload Your Data** option to bring it into Project Hypatia.
 
-**C) AI-Generated Simulation**
-1.  **AI Writes the Code**: The AI will read your methodology from Step 4 and automatically write a JavaScript simulation as a starting point.
-2.  **Run & Debug**: You can edit the code, use `console.log()` to print debug messages, and run the simulation directly in the browser's secure sandbox.
-3.  **Finish the Experiment**: The simulation must call the special `hypatia.finish(csvData, summary)` function to pass its results (in CSV string format) to the next step for analysis.
-4.  **Auto-Fix with AI**: If your code has a runtime error, an **Auto-Fix with AI** button will appear, allowing the AI to attempt to correct the bug for you.
-
-```javascript
-// Example of the required finish function:
-const csvData = "time,temperature\n0,20\n1,22\n2,25";
-const summaryText = "Simulated temperature increase over 2 seconds.";
-
-// This call passes the data to Step 7.
-hypatia.finish(csvData, summaryText);
-```
+**C) Agentic AI Simulation**
+1.  **AI Writes the Code**: The AI will read your methodology from Step 4 and automatically write a JavaScript simulation.
+2.  **Agentic Debugging**: When you click "Start Agentic Simulation," an AI Debugger agent takes over. It runs the code in a secure sandbox.
+3.  **Autonomous Correction**: If the code fails, the Debugger agent analyzes the error, rewrites the code to fix it, and retries. This loop continues until the code runs successfully and produces data, or until it reaches a maximum number of attempts.
+4.  **Completion**: The final, working code and its data output are saved to the step.
 
 **D) Dynamic Manual Data Entry**
--   If you've conducted your experiment offline, select this mode.
--   The AI will read your Data Collection Plan from Step 5 and generate a structured data entry table with the correct columns.
--   You can add or remove rows and enter your data directly into the form.
--   Once finished, click "Submit Data" to convert your entries into a CSV format and send it to Step 7 for analysis.
+-   The AI will read your Data Collection Plan from Step 5 and generate a structured data entry table for you to fill in.
 
 **E) AI Data Synthesis**
--   This mode is ideal for theoretical exploration or when you want to proceed without running a full simulation.
--   The AI will read your methodology and data plans from the previous steps.
--   It will then generate a plausible, synthetic dataset that logically follows from your research design.
--   You can review the generated data and summary, then click "Use This Data" to pass it to Step 7.
+-   Ideal for theoretical exploration. The AI will read your methodology and generate a plausible, synthetic dataset that logically follows from your research design.
 
 ---
 

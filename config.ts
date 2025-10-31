@@ -42,6 +42,7 @@ export interface ExperimentContextType {
     selectExperiment: (id: string) => void;
     setActiveExperiment: Dispatch<SetStateAction<Experiment | null>>;
     importExperiment: (experimentData: Experiment) => Promise<void>;
+    handleAuthentication: (type: 'promo' | 'key', value: string) => Promise<void>;
 }
 
 // FIX: Add and export ToastContextType, which was missing.

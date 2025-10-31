@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import { marked } from 'marked';
 import { appTests } from './index.test.tsx';
 import { Chart, registerables } from 'chart.js';
+import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
     SCIENTIFIC_FIELDS,
@@ -14,10 +15,8 @@ import {
 } from './config';
 import { db } from './be_db';
 import {
-    initializeGemini,
     getStepContext,
     getPromptForStep,
-    getPromptForInputSuggestion,
     testApiKey,
     parseGeminiError
 } from './be_gemini';
@@ -131,20 +130,11 @@ const App = () => {
 
     const { addToast } = useToast();
 
-    // Initialize Gemini and load experiments from Dexie on initial mount
+    // Load experiments from Dexie on initial mount. Gemini is initialized by user action.
     useEffect(() => {
         const loadData = async () => {
             try {
-                // Initialize Gemini first
-                const geminiInstance = initializeGemini();
-                if (geminiInstance) {
-                    setGemini(geminiInstance);
-                    addToast("Gemini API connection successful.", 'success');
-                } else {
-                     addToast("Gemini API key not found. Please configure it to use AI features.", 'danger');
-                }
-
-                // Then load experiments
+                // Load experiments
                 const storedExperiments = await db.experiments.orderBy('createdAt').reverse().toArray();
                 setExperiments(storedExperiments);
                 if (storedExperiments.length > 0) {
@@ -152,7 +142,7 @@ const App = () => {
                 }
             } catch (error) {
                 console.error("Failed to load data:", error);
-                addToast("Could not load saved experiments or initialize AI.", 'danger');
+                addToast("Could not load saved experiments.", 'danger');
             } finally {
                 setIsLoading(false);
             }
@@ -166,6 +156,37 @@ const App = () => {
              setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 100);
         }
     }, [gemini, view]);
+
+    const handleAuthentication = async (type: 'promo' | 'key', value: string) => {
+        let keyToUse: string | undefined = undefined;
+    
+        if (type === 'promo' && value.toUpperCase() === 'MTI') {
+            keyToUse = process.env.API_KEY;
+            if (!keyToUse) {
+                addToast("Promo code is valid, but no default API key is configured for this session.", 'danger');
+                return;
+            }
+        } else if (type === 'key' && value) {
+            keyToUse = value;
+        } else {
+            addToast("Invalid input. Please try again.", 'warning');
+            return;
+        }
+    
+        try {
+            const isValid = await testApiKey(keyToUse);
+            if (isValid) {
+                const geminiInstance = new GoogleGenAI({ apiKey: keyToUse });
+                setGemini(geminiInstance);
+                addToast("Authentication successful! Welcome to Project Hypatia.", 'success');
+            } else {
+                throw new Error("Invalid API Key provided.");
+            }
+        } catch (error) {
+            setGemini(null);
+            addToast(parseGeminiError(error, "Authentication failed. The key or code is not valid."), 'danger');
+        }
+    };
 
 
     // Handlers for experiment management
@@ -279,6 +300,7 @@ const App = () => {
         selectExperiment,
         setActiveExperiment,
         importExperiment,
+        handleAuthentication,
     };
 
     // Render logic
@@ -372,13 +394,72 @@ const Footer = () => (
     </footer>
 );
 
+const ApiKeySection = ({ onAuthenticate }) => {
+    const [apiKey, setApiKey] = useState('');
+    const [promoCode, setPromoCode] = useState('');
+    const [isAuthenticating, setIsAuthenticating] = useState(false);
+    const { addToast } = useToast();
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!apiKey && !promoCode) {
+            addToast('Please enter an API key or a promo code.', 'warning');
+            return;
+        }
+        setIsAuthenticating(true);
+        if (promoCode) {
+            await onAuthenticate('promo', promoCode);
+        } else {
+            await onAuthenticate('key', apiKey);
+        }
+        setIsAuthenticating(false);
+    };
+
+    return (
+        <div className="getting-started-fields mx-auto api-key-section">
+            <form onSubmit={handleSubmit}>
+                <p className="fw-bold text-light">Authenticate to Begin</p>
+                <p className="small text-white-50 mb-3">
+                    Please provide your Google Gemini API key to activate AI features. Your key is used only for this session and is not stored. You can get your free Gemini API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary-glow">Google AI Studio</a>.
+                </p>
+                <div className="mb-3">
+                    <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Enter your Gemini API Key"
+                        value={apiKey}
+                        onChange={(e) => { setApiKey(e.target.value); setPromoCode(''); }}
+                        disabled={isAuthenticating || !!promoCode}
+                        aria-label="Gemini API Key"
+                    />
+                </div>
+                <div className="text-center text-white-50 my-2">OR</div>
+                <div className="mb-3">
+                    <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Enter a Promo Code"
+                        value={promoCode}
+                        onChange={(e) => { setPromoCode(e.target.value); setApiKey(''); }}
+                        disabled={isAuthenticating || !!apiKey}
+                        aria-label="Promo Code"
+                    />
+                </div>
+                <button type="submit" className="btn btn-primary btn-lg w-100" disabled={isAuthenticating}>
+                    {isAuthenticating ? 'Validating...' : 'Unlock Hypatia'}
+                </button>
+            </form>
+        </div>
+    );
+};
+
 
 const LandingPage = ({ setView }) => {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [field, setField] = useState<string>(SCIENTIFIC_FIELDS[0]);
     const { addToast } = useToast();
-    const { gemini, createNewExperiment } = useExperiment();
+    const { gemini, createNewExperiment, handleAuthentication } = useExperiment();
 
     const handleStart = (e) => {
         e.preventDefault();
@@ -403,40 +484,45 @@ const LandingPage = ({ setView }) => {
                 <div className="landing-content">
                     <h1 className="display-4 landing-title">Project Hypatia</h1>
                     <p className="lead landing-subtitle mb-4">Project Hypatia is your AI-powered partner in scientific research, guiding you from initial question to the mock publication of a draft scientific paper.</p>
+                     
+                     {gemini ? (
+                         <div className="getting-started-fields mx-auto">
+                             <form onSubmit={handleStart}>
+                                 <p className="fw-bold text-light">Start a New Research Project</p>
+                                <div className="mb-3">
+                                    <input type="text" className="form-control" placeholder="Project Title" value={title} onChange={e => setTitle(e.target.value)} required />
+                                </div>
+                                <div className="mb-3">
+                                     <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
+                                </div>
+                                <div className="mb-3">
+                                   <label htmlFor="discipline-input" className="form-label visually-hidden">Scientific Discipline</label>
+                                   <input
+                                       type="text"
+                                       className="form-control"
+                                       id="discipline-input"
+                                       list="discipline-options"
+                                       placeholder="Enter or select a scientific discipline"
+                                       value={field}
+                                       onChange={e => setField(e.target.value)}
+                                       required
+                                   />
+                                   <datalist id="discipline-options">
+                                       {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f} />)}
+                                   </datalist>
+                               </div>
+                                 <button type="submit" className="btn btn-primary btn-lg w-100">
+                                    <i className="bi bi-play-circle me-2"></i> Begin Research
+                                </button>
+                             </form>
+                             <p className="mt-3 text-warning small">
+                                Be sure to read and edit AI output to keep the project aligned with your needs. Depending on project complexity, agentic AI generation can take several minutes per step—please be patient.
+                            </p>
+                        </div>
+                     ) : (
+                        <ApiKeySection onAuthenticate={handleAuthentication} />
+                     )}
 
-                     <div className="getting-started-fields mx-auto">
-                         <form onSubmit={handleStart}>
-                             <p className="fw-bold text-light">Start a New Research Project</p>
-                            <div className="mb-3">
-                                <input type="text" className="form-control" placeholder="Project Title" value={title} onChange={e => setTitle(e.target.value)} required />
-                            </div>
-                            <div className="mb-3">
-                                 <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
-                            </div>
-                            <div className="mb-3">
-                               <label htmlFor="discipline-input" className="form-label visually-hidden">Scientific Discipline</label>
-                               <input
-                                   type="text"
-                                   className="form-control"
-                                   id="discipline-input"
-                                   list="discipline-options"
-                                   placeholder="Enter or select a scientific discipline"
-                                   value={field}
-                                   onChange={e => setField(e.target.value)}
-                                   required
-                               />
-                               <datalist id="discipline-options">
-                                   {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f} />)}
-                               </datalist>
-                           </div>
-                             <button type="submit" className="btn btn-primary btn-lg w-100">
-                                <i className="bi bi-play-circle me-2"></i> Begin Research
-                            </button>
-                         </form>
-                         <p className="mt-3 text-warning small">
-                            Be sure to read and edit AI output to keep the project aligned with your needs. Depending on project complexity, agentic AI generation can take several minutes per step—please be patient.
-                        </p>
-                    </div>
 
                     <p className="mt-4 text-white-50 small">
                         An Application for ideation and to be used by Students, Scientists, Engineers, Lay Scientists and Anyone who wants to explore new ideas.

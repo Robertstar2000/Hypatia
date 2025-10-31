@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -15,15 +16,12 @@ import {
 
 // --- GEMINI API SERVICE ---
 
-let geminiInstance: GoogleGenAI | null = null;
-
+/**
+ * @deprecated The App component now manages the Gemini instance directly. This function is kept for potential future use or legacy support but should not be the primary way to get the Gemini instance.
+ */
 export const initializeGemini = (): GoogleGenAI | null => {
     // Adhere to security guidelines: API key is exclusively from environment variables.
     const apiKey = process.env.API_KEY;
-
-    if (geminiInstance) {
-        return geminiInstance;
-    }
 
     if (!apiKey) {
         console.error("API key is not configured in environment variables.");
@@ -31,11 +29,9 @@ export const initializeGemini = (): GoogleGenAI | null => {
     }
     
     try {
-        geminiInstance = new GoogleGenAI({ apiKey });
-        return geminiInstance;
+        return new GoogleGenAI({ apiKey });
     } catch (e) {
         console.error("Failed to initialize GoogleGenAI:", e);
-        geminiInstance = null;
         return null;
     }
 };
@@ -63,6 +59,7 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
 
 
 export const testApiKey = async (apiKey: string): Promise<boolean> => {
+    if (!apiKey) return false;
     try {
         const testGemini = new GoogleGenAI({ apiKey });
         await testGemini.models.generateContent({

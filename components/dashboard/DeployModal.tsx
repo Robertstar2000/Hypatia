@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { marked } from 'marked';
 import { Experiment } from '../../config';
@@ -8,6 +7,7 @@ import { getStepContext, getPromptForStep, parseGeminiError } from '../../be_gem
 export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportExperiment, gemini }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [generatedContent, setGeneratedContent] = useState('');
+    const [activeVirtualStep, setActiveVirtualStep] = useState<number | null>(null);
     const { addToast } = useToast();
 
     const handleArchiveAction = async () => {
@@ -16,23 +16,56 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
         onClose();
     };
 
-    const handleGenerate = async (step: number) => {
+    const handleAction = async (step: number, forceRegenerate: boolean = false) => {
+        if (isLoading) return;
+        setActiveVirtualStep(step);
+
+        if (!forceRegenerate && experiment.stepData[step]?.output) {
+            setGeneratedContent(experiment.stepData[step].output);
+            addToast("Loaded saved content.", "info");
+            return;
+        }
+
         if (!gemini) {
             addToast("Gemini AI is not available.", 'danger');
             return;
         }
+        
+        if (forceRegenerate && !window.confirm("This will replace the current content with a new AI generation. Any unsaved edits will be lost. Are you sure?")) {
+            return;
+        }
+
         setIsLoading(true);
         setGeneratedContent('');
         try {
             const context = getStepContext(experiment, step);
             const { basePrompt, config } = getPromptForStep(step, '', context, {});
             const response = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: basePrompt, config});
-            setGeneratedContent(response.text);
+            const newContent = response.text;
+            setGeneratedContent(newContent);
+
+            const updatedStepData = {
+                ...experiment.stepData,
+                [step]: { ...(experiment.stepData[step] || {}), output: newContent }
+            };
+            await onUpdateExperiment({ ...experiment, stepData: updatedStepData });
+            addToast("Content generated and saved.", "success");
+// FIX: Corrected the invalid `catch (error) =>` syntax to the valid `catch (error)`.
         } catch (error) {
             addToast(parseGeminiError(error, "Failed to generate content."), 'danger');
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleSaveEdits = async () => {
+        if (!activeVirtualStep) return;
+        const updatedStepData = {
+            ...experiment.stepData,
+            [activeVirtualStep]: { ...(experiment.stepData[activeVirtualStep] || {}), output: generatedContent }
+        };
+        await onUpdateExperiment({ ...experiment, stepData: updatedStepData });
+        addToast("Edits saved successfully!", "success");
     };
 
     const generateShareableSummary = () => {
@@ -74,11 +107,23 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
         if (generatedContent) {
             return (
                 <div>
-                    {/* Fix: Changed rows="10" to rows={10} to satisfy TypeScript's type checking for the 'rows' attribute. */}
-                    <textarea className="form-control" rows={10} value={generatedContent} readOnly></textarea>
-                     <button className="btn btn-sm btn-outline-secondary mt-2" onClick={() => { navigator.clipboard.writeText(generatedContent); addToast('Copied to clipboard!', 'success'); }}>
-                        <i className="bi bi-clipboard me-1"></i> Copy
-                    </button>
+                    <textarea 
+                        className="form-control" 
+                        rows={10} 
+                        value={generatedContent} 
+                        onChange={e => setGeneratedContent(e.target.value)}
+                    ></textarea>
+                     <div className="mt-2 d-flex justify-content-start">
+                        <button className="btn btn-sm btn-success me-2" onClick={handleSaveEdits}>
+                            <i className="bi bi-save me-1"></i> Save Edits
+                        </button>
+                        <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => { navigator.clipboard.writeText(generatedContent); addToast('Copied to clipboard!', 'success'); }}>
+                            <i className="bi bi-clipboard me-1"></i> Copy
+                        </button>
+                        <button className="btn btn-sm btn-outline-warning" onClick={() => handleAction(activeVirtualStep!, true)}>
+                            <i className="bi bi-arrow-clockwise me-1"></i> Regenerate
+                        </button>
+                    </div>
                 </div>
             );
         }
@@ -90,7 +135,9 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
             <h5 className="modal-title">Deploy Your Research</h5>
             <p className="text-white-50 small">This project used the Manual Control workflow, ideal for rigorous scientific work.</p>
             <div className="d-grid gap-2 mt-3">
-                <button className="btn btn-outline-primary" onClick={() => handleGenerate(11)}>Generate Submission Checklist</button>
+                <button className="btn btn-outline-primary" onClick={() => handleAction(11)}>
+                    {experiment.stepData[11]?.output ? 'View/Edit' : 'Generate'} Submission Checklist
+                </button>
                 <button className="btn btn-outline-secondary" onClick={() => onExportExperiment(experiment)}>Export for Collaboration</button>
                 <button className="btn btn-outline-warning" onClick={handleArchiveAction}>Archive Project</button>
             </div>
@@ -102,13 +149,16 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
             <h5 className="modal-title">Share Your Exploration</h5>
             <p className="text-white-50 small">This project used the Automated Generation workflow, great for educational use.</p>
             <div className="d-grid gap-2 mt-3">
-                <button className="btn btn-outline-primary" onClick={() => handleGenerate(12)}>Generate Presentation Outline</button>
+                <button className="btn btn-outline-primary" onClick={() => handleAction(12)}>
+                    {experiment.stepData[12]?.output ? 'View/Edit' : 'Generate'} Presentation Outline
+                </button>
                 <button className="btn btn-outline-secondary" onClick={generateShareableSummary}>Download Shareable Summary (HTML)</button>
                 <button className="btn btn-outline-warning" onClick={handleArchiveAction}>Archive Project</button>
             </div>
         </>
     );
 
+    // FIX: Added the missing `return` statement to ensure the component returns a valid JSX element.
     return (
          <div className="modal" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }} tabIndex={-1}>
             <div className="modal-dialog modal-dialog-centered">

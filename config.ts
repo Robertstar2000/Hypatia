@@ -143,7 +143,9 @@ export const STEP_SPECIFIC_TUNING_PARAMETERS = {
         { name: 'targetJournal', label: 'Target Journal Style', description: 'Tailor the tone, structure, and formatting to a specific type of academic journal.', type: 'select', options: ['High-Impact (Nature/Science)', 'Specialized Field Journal', 'General Open Access', 'Pre-print Server (arXiv)'], default: 'Specialized Field Journal' },
         { name: 'abstractLength', label: 'Abstract Length', description: 'Set the approximate word count for the abstract.', type: 'select', options: ['Concise (~150 words)', 'Standard (~250 words)', 'Extended (~400 words)'], default: 'Standard (~250 words)' },
         { name: 'authorVoice', label: 'Author Voice', description: 'Choose the narrative voice for the paper.', type: 'select', options: ['Formal Third-Person', 'Active First-Person Plural ("We found...")'], default: 'Formal Third-Person' },
-        { name: 'keywords', label: 'Generate Keywords', description: 'Generate a list of 5-7 relevant keywords for indexing.', type: 'boolean', default: true }
+        { name: 'keywords', label: 'Generate Keywords', description: 'Generate a list of 5-7 relevant keywords for indexing.', type: 'boolean', default: true },
+        { name: 'referenceStyle', label: 'Reference Style', description: 'Select the citation style for the bibliography.', type: 'select', options: ['APA', 'MLA', 'Chicago', 'IEEE'], default: 'APA' },
+        { name: 'pageCount', label: 'Approximate Page Count', description: 'Guide the overall length and detail of the paper.', type: 'select', options: ['Brief (1-3 pages)', 'Standard (5-7 pages)', 'Detailed (10+ pages)'], default: 'Standard (5-7 pages)' }
     ]
 };
 

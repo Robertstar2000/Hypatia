@@ -17,7 +17,7 @@ export const CodeSimulator = ({ onComplete, context }) => {
         status: 'idle', // 'idle', 'running', 'success', 'failed'
         logs: [],
         iterations: 0,
-        maxIterations: 4,
+        maxIterations: 25,
     });
     
     // Setup and teardown for the Web Worker

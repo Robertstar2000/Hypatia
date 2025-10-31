@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Chart } from 'chart.js';
 import { useExperiment } from '../../context/ExperimentContext';
@@ -15,7 +16,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     const [agenticRun, setAgenticRun] = useState({
         status: 'idle', // 'idle', 'running', 'success', 'failed'
         iterations: 0,
-        maxIterations: 5,
+        maxIterations: 25,
         logs: [],
     });
 
@@ -95,7 +96,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
                 new Chart(canvas.getContext('2d'), parsedConfig);
                 
                 // If local checks pass, proceed to AI QA
-                const qaPrompt = `You are the QA Agent. The goal is: "${initialChartDescription}". The Doer agent produced this Chart.js JSON: \`\`\`json\n${doerJson}\n\`\`\`. Does this JSON correctly visualize the data and fulfill the goal? Your response must be a valid JSON object.`;
+                const qaPrompt = `You are a strict QA Agent. The goal is: "${initialChartDescription}". The Doer agent produced this Chart.js JSON: \`\`\`json\n${doerJson}\n\`\`\`. Is this a perfect fulfillment of the stated goal? Only set "pass" to true if it is an exact and flawless match. Otherwise, provide concise, actionable feedback on what to change. Your response must be a valid JSON object.`;
                 const qaResponse = await gemini.models.generateContent({ 
                     model: 'gemini-flash-lite-latest', 
                     contents: qaPrompt, 

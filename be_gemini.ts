@@ -272,12 +272,17 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
  * @returns {Promise<string>} The final, formatted publication text in Markdown.
  */
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
-    // 1. Get full context
+    // 1. Get full context and fine-tuning settings
     const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
-    updateLog('System', 'Project context compiled.');
+    const fineTuneSettings = experiment.fineTuneSettings[10] || {};
+    const scientificField = experiment.field;
+    const referenceStyle = fineTuneSettings.referenceStyle || 'APA';
+    const pageCount = fineTuneSettings.pageCount || 'Standard (5-7 pages)';
+    
+    updateLog('System', `Project context compiled. Field: ${scientificField}. Style: ${referenceStyle}. Length: ${pageCount}.`);
 
     // 2. Outline
-    const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
+    const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
     const outlineResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: outlinePrompt });
     let sections;
     try {
@@ -299,9 +304,9 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         if (section.toLowerCase() === "results") {
             const analysisSummary = getStepContext(experiment, 7).analysis_summary;
             const chartCount = JSON.parse(experiment.stepData[7]?.output || '{}').chartSuggestions?.length || 0;
-            sectionPrompt = `Write the "${section}" section. Describe the findings from this analysis summary: "${analysisSummary}". Crucially, if there are charts to include (${chartCount} of them), you MUST insert placeholders for them where appropriate in the text. Use the format [CHART_1], [CHART_2], etc.`;
+            sectionPrompt = `Write the "${section}" section for a paper in ${scientificField}. The paper should be a ${pageCount} document. Describe the findings from this analysis summary: "${analysisSummary}". Crucially, if there are charts to include (${chartCount} of them), you MUST insert placeholders for them where appropriate in the text. Use the format [CHART_1], [CHART_2], etc.`;
         } else {
-             sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
+             sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
         }
         
         const sectionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: sectionPrompt });
@@ -315,7 +320,12 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     if (chartConfigs.length > 0) {
         updateLog('System', 'Generating chart captions...');
         for (let i = 0; i < chartConfigs.length; i++) {
-            const captionPrompt = `Write a descriptive caption for a scientific chart. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartConfigs[i].type} chart titled "${chartConfigs[i].data.datasets[0].label}".`;
+            // Defensively access chart properties to prevent crashes from malformed data.
+            const chartConfig = chartConfigs[i] || {};
+            const chartType = chartConfig.type || 'chart';
+            const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
+
+            const captionPrompt = `Write a descriptive caption for a scientific chart. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
             const captionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: captionPrompt });
             const caption = captionResponse.text;
             const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
@@ -330,8 +340,8 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         try {
             const refs = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '')).references;
             if (refs && refs.length > 0) {
-                 updateLog('System', 'Formatting references...');
-                const refsPrompt = `Format the following JSON reference list into a standard APA-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
+                 updateLog('System', `Formatting references in ${referenceStyle} style...`);
+                const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
                 const refsResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: refsPrompt });
                 paper += `\n## References\n\n${refsResponse.text}`;
                 updateLog('System', 'References section complete.');
@@ -343,7 +353,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
 
     // 6. Final Polish
     updateLog('Editor', 'Performing final editorial review...');
-    const polishPrompt = `You are an editor. Review the following paper for flow, consistency, and grammar. Add a title based on the content (as a Level 1 Markdown Header: # Title). Output the final, polished version in Markdown.\n\n${paper}`;
+    const polishPrompt = `You are an editor for a ${scientificField} journal. Review the following paper for flow, consistency, and grammar. The target length is ${pageCount}. Add a title based on the content (as a Level 1 Markdown Header: # Title). Output the final, polished version in Markdown.\n\n${paper}`;
     const finalResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: polishPrompt });
     updateLog('System', 'Publication ready.');
     

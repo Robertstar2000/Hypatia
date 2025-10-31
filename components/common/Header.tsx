@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { HelpModal } from './HelpModal';
@@ -10,7 +9,7 @@ export const Header = ({ setView, activeView, onToggleNotebook }) => {
 
     useEffect(() => {
         if (showHelp && !helpContent) {
-            fetch('./help.md')
+            fetch('/help.md')
                 .then(response => response.ok ? response.text() : Promise.reject('Failed to load'))
                 .then(text => setHelpContent(text))
                 .catch(err => {

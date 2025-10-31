@@ -493,23 +493,20 @@ const LandingPage = ({ setView }) => {
                                     <input type="text" className="form-control" placeholder="Project Title" value={title} onChange={e => setTitle(e.target.value)} required />
                                 </div>
                                 <div className="mb-3">
-                                     <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={2}></textarea>
+                                     <textarea className="form-control" placeholder="Briefly describe your research idea..." value={description} onChange={e => setDescription(e.target.value)} required rows={5}></textarea>
                                 </div>
                                 <div className="mb-3">
-                                   <label htmlFor="discipline-input" className="form-label visually-hidden">Scientific Discipline</label>
-                                   <input
-                                       type="text"
-                                       className="form-control"
-                                       id="discipline-input"
-                                       list="discipline-options"
-                                       placeholder="Enter or select a scientific discipline"
+                                   <label htmlFor="discipline-select" className="form-label visually-hidden">Scientific Discipline</label>
+                                   <select
+                                       id="discipline-select"
+                                       className="form-select"
                                        value={field}
                                        onChange={e => setField(e.target.value)}
                                        required
-                                   />
-                                   <datalist id="discipline-options">
-                                       {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f} />)}
-                                   </datalist>
+                                       aria-label="Scientific Discipline"
+                                   >
+                                       {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
+                                   </select>
                                </div>
                                  <button type="submit" className="btn btn-primary btn-lg w-100">
                                     <i className="bi bi-play-circle me-2"></i> Begin Research
@@ -1070,7 +1067,7 @@ const LabNotebook = ({ isOpen, onClose }) => {
 // FIX: Moved UniquenessMeter, DataAnalysisView and GeneratedOutput before ExperimentWorkspace
 const UniquenessMeter = ({ score, justification }) => {
     const percentage = (score * 100).toFixed(0);
-    const color = score > 0.7 ? 'text-success' : score > 0.4 ? 'text-warning' : 'text-danger';
+    const color = score > 0.8 ? 'text-success' : score > 0.5 ? 'text-warning' : 'text-danger';
 
     return (
         <div className="card mt-3">
@@ -1083,7 +1080,7 @@ const UniquenessMeter = ({ score, justification }) => {
                         </div>
                     </div>
                     <div className={`fw-bold ms-3 ${color}`} style={{ fontSize: '1.2rem' }}>
-                        {score > 0.7 ? 'Highly Unique' : score > 0.4 ? 'Moderately Unique' : 'Common Topic'}
+                        {score > 0.8 ? 'Highly Unique' : score > 0.5 ? 'Moderately Unique' : 'Common Topic'}
                     </div>
                 </div>
                 <p className="small text-white-50 mt-2 mb-0">{justification}</p>
@@ -1140,7 +1137,7 @@ const DataAnalysisView = ({ analysisData }) => {
         }
     }, [analysisData]); // Effect runs only when the data changes.
 
-    if (!analysisData || !analysisData.summary) {
+    if (!analysisData || analysisData.summary === undefined) {
         return <div className="alert alert-info">Awaiting analysis results...</div>;
     }
 
@@ -1158,7 +1155,8 @@ const DataAnalysisView = ({ analysisData }) => {
                                 <div className="card h-100">
                                     <div className="card-body" style={{ minHeight: '300px', position: 'relative' }}>
                                         {/* Canvas needs to be inside a relatively positioned container for responsive sizing */}
-                                        <canvas ref={el => chartRefs.current[index] = el}></canvas>
+                                        {/* FIX: The ref callback was implicitly returning the element, which is invalid. Changed to a block body to ensure it returns undefined. */}
+                                        <canvas ref={el => { chartRefs.current[index] = el; }}></canvas>
                                     </div>
                                 </div>
                             </div>
@@ -1208,10 +1206,14 @@ const GeneratedOutput: React.FC<{
     }
 
     const jsonParser = (text) => {
+        let data;
         try {
-            // New: Sanitize the string before parsing. Remove markdown fences and trim.
             const sanitizedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            const data = JSON.parse(sanitizedText);
+            if (!sanitizedText) throw new Error("AI response was empty.");
+            if (!sanitizedText.startsWith('{') || !sanitizedText.endsWith('}')) {
+                 throw new Error("Sanitized text is not a JSON object.");
+            }
+            data = JSON.parse(sanitizedText);
             
             // Step 1: Research Question
             if (stepId === 1 && data.research_question && data.uniqueness_score !== undefined) {
@@ -1244,17 +1246,40 @@ const GeneratedOutput: React.FC<{
                 );
             }
 
-            // Step 7: Data Analyzer
-            if (stepId === 7 && data.summary && Array.isArray(data.chartSuggestions)) {
-                 return <DataAnalysisView analysisData={data} />;
+            // Step 7: Data Analyzer (Robust parsing)
+            if (stepId === 7) {
+                 const summary = data.summary || '';
+                 const chartSuggestions = (Array.isArray(data.chartSuggestions) ? data.chartSuggestions : [])
+                    .filter(c => c && typeof c === 'object' && c.type && c.data && Array.isArray(c.data.datasets));
+                 
+                 if (!summary && chartSuggestions.length === 0) {
+                    throw new Error("Parsed JSON for Step 7 is missing both 'summary' and 'chartSuggestions'.");
+                 }
+                 
+                 const hadChartsInitially = Array.isArray(data.chartSuggestions) && data.chartSuggestions.length > 0;
+                 const hasValidCharts = chartSuggestions.length > 0;
+
+                 return (
+                     <div>
+                         {hadChartsInitially && !hasValidCharts &&
+                             <div className="alert alert-info small mb-3">
+                                 The AI suggested visualizations, but they were in an invalid format and could not be rendered. The summary is displayed below.
+                             </div>
+                         }
+                         <DataAnalysisView analysisData={{ summary, chartSuggestions }} />
+                     </div>
+                 );
             }
             throw new Error("JSON format is valid, but does not match expected structure for this step.");
         } catch (error) {
             console.error("JSON Parse Error:", error);
+            // Fallback for ANY error: render raw text with a warning. This prevents getting stuck.
             return (
-                <div className="alert alert-danger">
-                    <p className="fw-bold">Failed to render analysis. AI response was not in the correct JSON format.</p>
-                    <p className="small mb-1">Details: {error.message}</p>
+                <div>
+                    <div className="alert alert-warning">
+                        <p className="fw-bold">AI response could not be parsed as structured data.</p>
+                        <p className="small mb-1">You can still review the raw text below and complete the step. The raw text will be used as the step's output.</p>
+                    </div>
                     <pre className="p-2 bg-dark text-white rounded small" style={{whiteSpace: 'pre-wrap'}}><code>{text}</code></pre>
                 </div>
             );
@@ -1401,7 +1426,7 @@ const ExperimentWorkspace = () => {
                 if (i === 6) {
                     const context = getStepContext(currentExp, 6);
                     const { basePrompt, config } = getPromptForStep(6, '', context, {});
-                    const response = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: basePrompt, config});
+                    const response = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: basePrompt, config});
                     const [summary, csv] = response.text.split('---').map(s => s.trim());
                     if (!summary || !csv) throw new Error("AI response format was incorrect for data synthesis.");
 
@@ -1413,7 +1438,7 @@ const ExperimentWorkspace = () => {
                     const userInput = currentExp.stepData[i]?.input || 'Proceed with generation.';
                     const fineTuneSettings = i === 7 ? { isAutomated: true } : {};
                     const { basePrompt, config } = getPromptForStep(i, userInput, context, fineTuneSettings);
-                    const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+                    const response = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: basePrompt, config });
                     resultText = response.text;
                     currentStepData = { ...currentStepData, output: resultText };
                 }
@@ -1421,7 +1446,7 @@ const ExperimentWorkspace = () => {
 
                 // Summarize and complete the step
                 const summaryPrompt = `Concisely summarize the following text in 1-2 sentences for a project log:\n\n${currentExp.stepData[i].output}`;
-                const summaryResponse = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: summaryPrompt});
+                const summaryResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: summaryPrompt});
                 currentExp.stepData[i].summary = summaryResponse.text;
                 currentExp.currentStep = i < WORKFLOW_STEPS.length ? i + 1 : WORKFLOW_STEPS.length + 1;
     
@@ -1647,114 +1672,183 @@ const ExperimentWorkspace = () => {
     );
 };
 
-const DataAnalysisWorkspace = ({ onStepComplete }) => {
-    const { activeExperiment, updateExperiment, gemini, setActiveExperiment } = useExperiment();
-    const { addToast } = useToast();
-    const [analysisStage, setAnalysisStage] = useState<'init' | 'suggest' | 'analyze' | 'complete'>('init');
-    const [suggestedMethods, setSuggestedMethods] = useState<{name: string, description: string}[]>([]);
-    const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    
-    const stepData = activeExperiment.stepData[7] || {};
-
-    const handleSuggestMethods = useCallback(async () => {
-        setIsLoading(true);
-        try {
-            const context = getStepContext(activeExperiment, 7);
-            const { basePrompt, config } = getPromptForStep(7, '', context, { analysisStage: 'suggest_methods' });
-            const response = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: basePrompt, config});
-            const sanitizedText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(sanitizedText);
-            setSuggestedMethods(parsed.methods);
-        } catch (error) {
-            addToast(parseGeminiError(error, "Failed to suggest analysis methods."), 'danger');
-        } finally {
-            setIsLoading(false);
-        }
-    }, [activeExperiment, gemini, addToast]);
-
-    const handlePerformAnalysis = useCallback(async (method: string | null, extraSettings: { isAutomated?: boolean } = {}) => {
-        setSelectedMethod(method);
-        setIsLoading(true);
-        setAnalysisStage('analyze');
-        
-        let currentOutput = '';
-        try {
-            const context = getStepContext(activeExperiment, 7);
-            const fineTuneSettings = { 
-                ...activeExperiment.fineTuneSettings[7], 
-                selectedMethod: method,
-                ...extraSettings 
-            };
-            const { basePrompt, config } = getPromptForStep(7, stepData.input || '', context, fineTuneSettings);
-            
-            const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
-            currentOutput = response.text;
-
-        } catch (error) {
-            currentOutput = `Error: ${parseGeminiError(error)}`;
-            addToast(parseGeminiError(error), 'danger');
-        } finally {
-             const finalStepData = { ...stepData, output: currentOutput };
-             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
-             setIsLoading(false);
-             setAnalysisStage('complete');
-             if (extraSettings.isAutomated) {
-                onStepComplete();
-             }
-        }
-    }, [activeExperiment, updateExperiment, gemini, stepData, addToast, onStepComplete]);
+const AgenticAnalysisView = ({ agenticRun }) => {
+    const logsEndRef = useRef(null);
 
     useEffect(() => {
-        if (stepData.output) {
-            setAnalysisStage('complete');
-        } else if (activeExperiment.automationMode === 'automated') {
-            handlePerformAnalysis(null, { isAutomated: true });
-        } else {
-            setAnalysisStage('suggest');
-            if (suggestedMethods.length === 0) {
-                handleSuggestMethods();
-            }
-        }
-    }, [activeExperiment.automationMode, stepData.output, suggestedMethods.length, handlePerformAnalysis, handleSuggestMethods]);
-
-
-    if (isLoading && analysisStage !== 'analyze') {
-        return <div className="text-center p-4"><div className="spinner-border"></div><p className="mt-2">AI is working...</p></div>;
-    }
-
-    if (analysisStage === 'suggest') {
-        return (
-            <div>
-                <h5 className="fw-bold">Suggest Analysis Methods</h5>
-                <p className="text-white-50">Based on your data, the AI suggests the following methods. Please select one to proceed.</p>
-                <div className="list-group">
-                    {suggestedMethods.map((method, index) => (
-                        <button key={index} type="button" className="list-group-item list-group-item-action" onClick={() => handlePerformAnalysis(method.name)}>
-                            <div className="d-flex w-100 justify-content-between">
-                                <h6 className="mb-1 text-primary-glow">{method.name}</h6>
-                            </div>
-                            <p className="mb-1 small text-white-50">{method.description}</p>
-                        </button>
-                    ))}
-                </div>
-            </div>
-        );
-    }
+        logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [agenticRun.logs]);
     
     return (
+        <div className="p-4">
+            <h5 className="fw-bold text-center">AI Agents at Work...</h5>
+            <p className="text-white-50 text-center">A multi-agent workflow is analyzing your data and generating visualizations.</p>
+            <div className="progress my-3" style={{height: '20px'}}>
+                <div 
+                    className="progress-bar progress-bar-striped progress-bar-animated" 
+                    style={{ width: `${(agenticRun.iterations / agenticRun.maxIterations) * 100}%` }}
+                >{`Iteration ${agenticRun.iterations}/${agenticRun.maxIterations}`}</div>
+            </div>
+            <div className="agent-log-container">
+                {agenticRun.logs.map((log, index) => (
+                    <div key={index} className={`agent-log-entry agent-log-${log.agent.toLowerCase()}`}>
+                        <span className="agent-log-agent">{log.agent}:</span>
+                        <span className="agent-log-message">{log.message}</span>
+                    </div>
+                ))}
+                <div ref={logsEndRef} />
+            </div>
+        </div>
+    );
+};
+
+
+const DataAnalysisWorkspace = ({ onStepComplete }) => {
+    const { activeExperiment, updateExperiment, gemini } = useExperiment();
+    const { addToast } = useToast();
+    const [isLoading, setIsLoading] = useState(false);
+    const [agenticRun, setAgenticRun] = useState({
+        status: 'idle', // 'idle', 'running', 'success', 'failed'
+        iterations: 0,
+        maxIterations: 50,
+        logs: [],
+        finalChartConfig: null,
+        finalSummary: ''
+    });
+
+    const stepData = activeExperiment.stepData[7] || {};
+
+    const performAgenticAnalysis = useCallback(async () => {
+        if (!gemini) {
+            addToast("Gemini not available", "danger");
+            return;
+        }
+
+        setAgenticRun(prev => ({ ...prev, status: 'running', logs: [], iterations: 0 }));
+        
+        let initialGoalSummary = '';
+        let initialChartDescription = 'No chart was suggested by the initial analysis.';
+
+        try {
+            // Step 1: Get the initial analysis and goal description
+            const context = getStepContext(activeExperiment, 7);
+            const { basePrompt: initialPrompt, config: initialConfig } = getPromptForStep(7, stepData.input || '', context, { isAutomated: true });
+            const initialResponse = await gemini.models.generateContent({model: 'gemini-flash-lite-latest', contents: initialPrompt, config: initialConfig});
+            
+            const initialResult = JSON.parse(initialResponse.text.replace(/```json/g, '').replace(/```/g, '').trim());
+            initialGoalSummary = initialResult.summary;
+            if (initialResult.chartSuggestions && initialResult.chartSuggestions.length > 0) {
+                const chart = initialResult.chartSuggestions[0];
+                // Defensive check to prevent crash on malformed chart object
+                if (chart && chart.type && chart.data && Array.isArray(chart.data.datasets) && chart.data.datasets.length > 0 && chart.data.datasets[0].label) {
+                    initialChartDescription = `Create a '${chart.type}' chart. The dataset label should be '${chart.data.datasets[0].label}'.`;
+                } else if (chart && chart.type) {
+                    initialChartDescription = `Create a '${chart.type}' chart based on the provided data.`;
+                }
+            }
+
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'System', message: `Goal set: ${initialChartDescription}`}]}));
+
+        } catch (error) {
+            addToast(parseGeminiError(error, "Failed to get initial analysis goal."), 'danger');
+            setAgenticRun(prev => ({ ...prev, status: 'failed' }));
+            return;
+        }
+        
+        let history = ``;
+        let lastDoerOutput = "{}";
+        let lastQAFeedback = "No feedback yet. This is the first attempt.";
+        const csvData = stepData.input || '';
+
+        const exampleLine = `{"type":"line","data":{"labels":["Jan","Feb"],"datasets":[{"label":"Product A","data":[100,120]},{"label":"Product B","data":[80,90]}]}}`;
+        const exampleBar = `{"type":"bar","data":{"labels":["A","B"],"datasets":[{"label":"Count","data":[10,20]}]}}`;
+
+        for (let i = 0; i < agenticRun.maxIterations; i++) {
+            setAgenticRun(prev => ({...prev, iterations: i + 1, logs: [...prev.logs, {agent: 'System', message: `--- Iteration ${i+1} ---`}]}));
+
+            // Manager's Turn
+            const managerPrompt = `You are the Manager Agent. Your goal is to get a valid Chart.js configuration that matches this description: "${initialChartDescription}". You have examples for bar graphs and line graphs. Bar: ${exampleBar}. Line: ${exampleLine}. The raw data is: \`\`\`csv\n${csvData}\n\`\`\`. The last QA feedback was: "${lastQAFeedback}". Based on this feedback, provide a new, clear, and concise instruction to the Doer agent. Focus on correcting the specific error.`;
+            const managerResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: managerPrompt });
+            const managerInstruction = managerResponse.text;
+            history += `\nManager: ${managerInstruction}`;
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Manager', message: managerInstruction}]}));
+
+            // Doer's Turn
+            const doerPrompt = `You are the Doer. You ONLY generate Chart.js JSON configurations for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". You MUST parse the provided CSV data and use its values to populate the 'data.datasets[0].data' array with numbers. The 'labels' should correspond to the appropriate column in the CSV. The data is: \`\`\`csv\n${csvData}\n\`\`\`. Output ONLY the raw JSON.`;
+            const doerResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: doerPrompt });
+            const doerJson = doerResponse.text.replace(/```json/g, '').replace(/```/g, '').trim();
+            lastDoerOutput = doerJson;
+            history += `\nDoer: ${doerJson}`;
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'Doer', message: 'Generated new chart configuration.'}]}));
+
+            // QA's Turn
+            let qaPass = false;
+            let parsedConfig;
+            try {
+                // Local Programmatic Validation First
+                parsedConfig = JSON.parse(doerJson);
+                 if (!parsedConfig?.data?.datasets || !Array.isArray(parsedConfig.data.datasets) || parsedConfig.data.datasets.length === 0) {
+                    throw new Error("Local validation failed: `data.datasets` array is missing or empty.");
+                }
+                if (!parsedConfig.data.datasets[0].data || !Array.isArray(parsedConfig.data.datasets[0].data) || parsedConfig.data.datasets[0].data.length === 0) {
+                    throw new Error("Local validation failed: `datasets[0].data` array is missing or empty.");
+                }
+                 if (parsedConfig.data.datasets[0].data.some(d => typeof d !== 'number')) {
+                    throw new Error("Local validation failed: `datasets[0].data` contains non-numeric values.");
+                }
+                const canvas = document.createElement('canvas');
+                new Chart(canvas.getContext('2d'), parsedConfig);
+                
+                // If local checks pass, proceed to AI QA
+                const qaPrompt = `You are the QA Agent. The goal is: "${initialChartDescription}". The Doer agent produced this Chart.js JSON: \`\`\`json\n${doerJson}\n\`\`\`. Does this JSON correctly visualize the data and fulfill the goal? Respond with ONLY a single raw JSON object: {"pass": boolean, "feedback": "Concise feedback for the Doer."}`;
+                const qaResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: qaPrompt, config: {responseMimeType: 'application/json'} });
+                const qaResult = JSON.parse(qaResponse.text);
+                qaPass = qaResult.pass;
+                lastQAFeedback = qaResult.feedback;
+            } catch (e) {
+                lastQAFeedback = e.message;
+            }
+            history += `\nQA: ${lastQAFeedback}`;
+            setAgenticRun(prev => ({...prev, logs: [...prev.logs, {agent: 'QA', message: lastQAFeedback}]}));
+
+            if (qaPass) {
+                const finalOutput = JSON.stringify({ summary: initialGoalSummary, chartSuggestions: [parsedConfig] });
+                const finalStepData = { ...stepData, output: finalOutput };
+                await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+                setAgenticRun(prev => ({ ...prev, status: 'success' }));
+                addToast("Agentic analysis complete!", "success");
+                return;
+            }
+        }
+        
+        // Loop finished without success
+        addToast(`Agentic workflow failed after ${agenticRun.maxIterations} iterations. Saving summary only.`, 'warning');
+        const finalOutput = JSON.stringify({ summary: initialGoalSummary, chartSuggestions: [] });
+        const finalStepData = { ...stepData, output: finalOutput };
+        await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+        setAgenticRun(prev => ({ ...prev, status: 'failed' }));
+    }, [activeExperiment, gemini, addToast, updateExperiment, stepData]);
+    
+    useEffect(() => {
+        if (!stepData.output) {
+            performAgenticAnalysis();
+        }
+    }, []);
+
+    if (agenticRun.status === 'running') {
+        return <AgenticAnalysisView agenticRun={agenticRun} />;
+    }
+
+    return (
         <div>
-            {analysisStage === 'analyze' && isLoading && (
-                <div className="text-center p-5">
-                    <div className="spinner-border mb-3" role="status"></div>
-                    <h5>AI is performing the analysis {selectedMethod ? `using "${selectedMethod}"` : ''}...</h5>
-                    <p className="text-white-50">This may take a moment.</p>
-                </div>
-            )}
-            <GeneratedOutput stepId={7} onGenerate={() => handlePerformAnalysis(selectedMethod)} isLoading={isLoading} />
-             {analysisStage === 'complete' && activeExperiment.automationMode !== 'automated' && (
+            <GeneratedOutput 
+                stepId={7} 
+                onGenerate={performAgenticAnalysis} 
+                isLoading={agenticRun.status === 'running'} 
+            />
+             {stepData.output && (
                  <div className="card-footer d-flex justify-content-end align-items-center bottom-nav">
-                    <button className="btn btn-success" onClick={onStepComplete} disabled={isLoading || !stepData?.output}>
+                    <button className="btn btn-success" onClick={onStepComplete} disabled={agenticRun.status === 'running'}>
                         <i className="bi bi-check-circle-fill me-1"></i> Complete Step & Continue
                     </button>
                  </div>
@@ -1832,76 +1926,75 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId, 
                 <head>
                     <title>Print - ${experimentTitle}</title>
                     <style>
-                        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 20px auto; padding: 25px; } 
-                        h1, h2, h3 { color: #000; } hr { border: 0; border-top: 1px solid #eee; margin: 20px 0; }
-                        code { background-color: #f3f3f3; padding: .2em .4em; font-size: .85em; border-radius: 3px; }
-                        pre { background-color: #f3f3f3; padding: 1em; border-radius: 5px; overflow-x: auto; }
-                        img { max-width: 100%; height: auto; border-radius: 5px; margin-top: 1em; margin-bottom: 1em; }
-                        @media print {
-                            body { margin: 0; padding: 0; }
-                            img { break-inside: avoid; }
-                        }
+                        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 20px auto; }
+                        h1, h2, h3, h4 { color: #000; }
+                        pre, code { background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; font-family: monospace; }
+                        pre { padding: 1em; overflow: auto; }
+                        img { max-width: 100%; height: auto; }
                     </style>
                 </head>
                 <body>
-                    <h1>${experimentTitle}</h1>
-                    <hr>
                     ${printContent}
+                    <script>
+                        setTimeout(() => {
+                            window.print();
+                            window.close();
+                        }, 500);
+                    </script>
                 </body>
                 </html>
             `);
             printWindow.document.close();
-            printWindow.focus();
-            setTimeout(() => {
-                printWindow.print();
-                printWindow.close();
-            }, 250);
             return;
         }
 
         let blob;
-        let filename = `publication_${experimentId}.${format}`;
-
-        if (format === 'md') {
-            blob = new Blob([publicationText], { type: 'text/markdown;charset=utf-8' });
-        } else if (format === 'doc') {
-            const content = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${experimentTitle}</title></head><body>${marked(publicationText)}</body></html>`;
-            blob = new Blob([content], { type: 'application/vnd.ms-word' });
-        } else if (format === 'txt') {
-            blob = new Blob([publicationText], { type: 'text/plain;charset=utf-8' });
+        let filename = `${experimentTitle.replace(/ /g, '_')}_${experimentId}`;
+        if (format === 'doc') {
+            const htmlContent = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>${experimentTitle}</title></head>
+                <body>${marked(publicationText)}</body>
+                </html>`;
+            blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+            filename += '.doc';
+        } else {
+            const content = format === 'md' ? publicationText : contentRef.current?.innerText || publicationText;
+            blob = new Blob([content], { type: 'text/plain' });
+            filename += `.${format}`;
         }
-
-        if (blob) {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
-        }
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
         <div>
-            <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                <h5 className="fw-bold mb-0">Publication Draft</h5>
-                 <div>
-                     {showRegenerate && <button className="btn btn-outline-warning me-2" onClick={onRegenerate}><i className="bi bi-arrow-clockwise me-1"></i> Regenerate</button>}
-                     <div className="btn-group">
-                        <button type="button" className="btn btn-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i className="bi bi-download me-1"></i> Download
-                        </button>
-                        <ul className="dropdown-menu">
-                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('md')}>Markdown (.md)</a></li>
-                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('txt')}>Plain Text (.txt)</a></li>
-                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('doc')}>Word Document (.doc)</a></li>
-                            <li><a className="dropdown-item" href="#" onClick={() => handleDownload('pdf')}>PDF (via Print)</a></li>
-                        </ul>
-                    </div>
-                 </div>
-             </div>
-             <hr/>
-             <div ref={contentRef} className="generated-text-container" />
+            <div className="d-flex justify-content-end mb-2">
+                {showRegenerate && 
+                    <button className="btn btn-sm btn-outline-secondary me-auto" onClick={onRegenerate}>
+                        <i className="bi bi-arrow-clockwise me-1"></i> Regenerate with Agents
+                    </button>
+                }
+                <div className="btn-group">
+                    <button type="button" className="btn btn-sm btn-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                       <i className="bi bi-download me-1"></i> Download As
+                    </button>
+                    <ul className="dropdown-menu dropdown-menu-end">
+                        <li><a className="dropdown-item" href="#" onClick={() => handleDownload('md')}>Markdown (.md)</a></li>
+                        <li><a className="dropdown-item" href="#" onClick={() => handleDownload('txt')}>Plain Text (.txt)</a></li>
+                        <li><a className="dropdown-item" href="#" onClick={() => handleDownload('doc')}>Word Document (.doc)</a></li>
+                         <li><a className="dropdown-item" href="#" onClick={() => handleDownload('pdf')}>PDF (Print)</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div ref={contentRef} className="generated-text-container" style={{ minHeight: '50vh' }}>
+                {/* Content is rendered here via useEffect */}
+            </div>
         </div>
     );
 };
@@ -1909,279 +2002,259 @@ const FinalPublicationView = ({ publicationText, experimentTitle, experimentId, 
 const PublicationExporter = () => {
     const { activeExperiment, updateExperiment, gemini } = useExperiment();
     const { addToast } = useToast();
-    
-    const [generationState, setGenerationState] = useState<'tuning' | 'generating' | 'complete'>('tuning');
-    const [tuningSettings, setTuningSettings] = useState({
-        length: '5 pages',
-        referenceFormat: 'APA'
-    });
-    const [progress, setProgress] = useState({ percent: 0, section: '', iteration: 0, status: '' });
-    const [publicationText, setPublicationText] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [agenticRun, setAgenticRun] = useState({ logs: [], status: 'idle', iterations: 0 });
+    const stepData = activeExperiment.stepData[10] || {};
+    const publicationText = stepData.output || '';
 
-    useEffect(() => {
-        const draft = activeExperiment.stepData[10]?.output;
-        if (draft) {
-            setPublicationText(draft);
-            setGenerationState('complete');
-        }
-    }, [activeExperiment]);
-
-    const renderChartsAsBase64 = async (chartConfigs) => {
-        if (!Array.isArray(chartConfigs)) return [];
-
-        const imagePromises = chartConfigs.map(async (config, index) => {
-            if (!config || typeof config !== 'object') return null;
-            
-            const offscreenCanvas = document.createElement('canvas');
-            offscreenCanvas.width = 600;
-            offscreenCanvas.height = 400;
-            
-            try {
-                const styledConfig = ensureChartStyling(config);
-                const chart = new Chart(offscreenCanvas, { ...styledConfig, options: { ...(styledConfig.options || {}), animation: false, responsive: false } });
-                await new Promise(resolve => setTimeout(resolve, 500)); 
-                const dataUrl = chart.toBase64Image();
-                chart.destroy();
-                return dataUrl;
-            } catch(error) {
-                console.error(`Failed to render chart ${index} for export:`, error);
-                addToast(`Chart ${index+1} could not be rendered for export.`, 'warning');
-                return null;
-            }
-        });
-
-        return Promise.all(imagePromises);
-    };
-
-    const injectChartsIntoMarkdown = async (markdown, chartData) => {
-        if (!chartData?.chartSuggestions?.length) return markdown;
-
-        addToast("Rendering data visualizations...", "info");
-        const base64Images = await renderChartsAsBase64(chartData.chartSuggestions);
-        let updatedMarkdown = markdown;
-
-        base64Images.forEach((imgData, index) => {
-            if (!imgData) return; // Skip if the chart failed to render
-            const placeholderRegex = new RegExp(`\\[CHART_${index + 1}:(.*?)\\]`, 'gi');
-            updatedMarkdown = updatedMarkdown.replace(placeholderRegex, (match, caption) => {
-                const trimmedCaption = caption.trim();
-                return `\n![${trimmedCaption}](${imgData})\n*Figure ${index + 1}: ${trimmedCaption}*\n`;
-            });
-        });
-        
-        return updatedMarkdown;
-    };
-    
-    const handleGeneratePublication = async () => {
-        if (!gemini) {
-            addToast("Gemini is not initialized.", "danger");
-            return;
-        }
-        setGenerationState('generating');
-        setPublicationText('');
-        
-        const paperSections = ['Abstract', 'Introduction', 'Methodology', 'Results', 'Discussion', 'Conclusion', 'References'];
-        let fullPaper = `# ${activeExperiment.title}\n\n`;
-        const totalSteps = paperSections.length;
-        let completedSteps = 0;
-        
+    const handleManualGenerate = async (regenerateFeedback = '') => {
+        setIsLoading(true);
         try {
             const context = getStepContext(activeExperiment, 10);
-            const { basePrompt, config } = getPromptForStep(10, '', context, tuningSettings);
-
-            setProgress({
-                percent: 10,
-                section: 'Drafting',
-                status: 'Agent [Writer] is drafting the full paper...'
-            });
-
-            const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: basePrompt, config });
-            fullPaper = `# ${activeExperiment.title}\n\n${response.text}`;
-            setPublicationText(fullPaper);
-
-            setProgress({ percent: 90, section: 'Complete', iteration: 1, status: 'Injecting visualizations...' });
-
-            let finalPaperWithCharts = fullPaper;
-            const analysisOutput = activeExperiment.stepData[7]?.output;
-            if (analysisOutput) {
-                try {
-                    const sanitizedText = analysisOutput.replace(/```json/g, '').replace(/```/g, '').trim();
-                    const chartData = JSON.parse(sanitizedText);
-                    finalPaperWithCharts = await injectChartsIntoMarkdown(fullPaper, chartData);
-                } catch(e) {
-                    console.error("Could not parse chart data, skipping injection.", e);
-                    addToast("Could not parse chart data; skipping chart injection.", "warning");
-                }
+            const { basePrompt, config } = getPromptForStep(10, '', context, activeExperiment.fineTuneSettings[10], regenerateFeedback);
+            const stream = await gemini.models.generateContentStream({ model: 'gemini-2.5-flash', contents: basePrompt, config });
+            let buffer = '';
+            for await (const chunk of stream) {
+                buffer += chunk.text;
+                updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 10: { ...stepData, output: buffer } } });
             }
-            
-            setPublicationText(finalPaperWithCharts);
-            setGenerationState('complete');
-            addToast("Publication draft generated successfully!", "success");
-
-            const updatedStepData = { ...activeExperiment.stepData, 10: { ...activeExperiment.stepData[10], output: finalPaperWithCharts, summary: "Publication draft generated." }};
-            await updateExperiment({ ...activeExperiment, stepData: updatedStepData, currentStep: 11 });
-
         } catch (error) {
-            addToast(parseGeminiError(error, "An error occurred during paper generation."), 'danger');
-            setGenerationState('tuning');
+            addToast(parseGeminiError(error), 'danger');
+        } finally {
+            setIsLoading(false);
         }
     };
     
-    const renderTuningScreen = () => (
-        <div className="text-center p-4">
-            <h5 className="fw-bold">Prepare for Publication</h5>
-            <p className="text-white-50">Set the tuning parameters for the AI agents to generate your scientific paper draft.</p>
-            <div className="card my-3 text-start">
-                <div className="card-body">
-                    <div className="mb-3">
-                        <label className="form-label">Desired Paper Length</label>
-                        <input 
-                            type="text" 
-                            className="form-control" 
-                            value={tuningSettings.length} 
-                            onChange={(e) => setTuningSettings(p => ({...p, length: e.target.value}))} 
-                        />
-                         <div className="form-text">e.g., "approx. 3000 words", "5-7 pages"</div>
-                    </div>
-                    <div className="mb-3">
-                        <label className="form-label">Reference Format</label>
-                        <select 
-                            className="form-select"
-                            value={tuningSettings.referenceFormat}
-                            onChange={(e) => setTuningSettings(p => ({...p, referenceFormat: e.target.value}))} 
-                        >
-                            <option>APA</option>
-                            <option>MLA</option>
-                            <option>Chicago</option>
-                            <option>IEEE</option>
-                        </select>
-                    </div>
+    const handleAgenticGeneration = async () => {
+        setIsLoading(true);
+        setAgenticRun({ logs: [], status: 'running', iterations: 0 });
+        let currentDraft = '';
+
+        try {
+            const addLog = (agent, message) => setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent, message }] }));
+
+            // 1. Get Context
+            const initialContext = getStepContext(activeExperiment, 10);
+            addLog('System', 'Project context compiled.');
+
+            // 2. Author Agent
+            setAgenticRun(prev => ({ ...prev, iterations: 1 }));
+            addLog('Author', 'Drafting initial paper...');
+            const authorPrompt = `You are the Author agent. Based on the following project log, write the complete content for a scientific paper in Markdown format, including all sections from Abstract to Conclusion. The paper should be written for an expert audience in ${initialContext.experimentField}. It is of **critical importance** that when you write the 'Discussion' section, you MUST explicitly and thoroughly address the feedback provided in the 'Peer Review Simulation' (Step 9) of the log. Explain in detail how the research accounts for or counters the critiques. Your source material is this project log:\n\n${initialContext.full_project_summary_log}`;
+            const authorResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: authorPrompt });
+            currentDraft = authorResponse.text;
+            addLog('Author', 'Initial draft complete.');
+
+            // 3. Editor Agent
+            setAgenticRun(prev => ({ ...prev, iterations: 2 }));
+            addLog('Editor', 'Reviewing and editing draft...');
+            const editorPrompt = `You are the Editor agent, a meticulous proofreader and scientific editor. You will be given a draft written by the Author agent and the full project log for context. Your job is to improve the draft by correcting grammar, enhancing clarity, and ensuring a formal, academic tone. **YOUR MOST IMPORTANT TASK:** Rigorously verify that the Author has adequately addressed all points from the simulated peer review (Step 9) within the 'Discussion' section. If the response is weak, evasive, or missing, you MUST revise it to be more robust and scientifically sound. Your output must be ONLY the full, corrected Markdown text of the paper.`;
+            const editorResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: `${editorPrompt}\n\nProject Log:\n${initialContext.full_project_summary_log}\n\nAuthor's Draft:\n${currentDraft}` });
+            currentDraft = editorResponse.text;
+            addLog('Editor', 'Editing complete.');
+
+            // 4. Formatter & Chart Placer Agent
+            setAgenticRun(prev => ({ ...prev, iterations: 3 }));
+            addLog('Formatter', 'Formatting and embedding chart placeholders...');
+            const analysisData = JSON.parse(activeExperiment.stepData[7]?.output || '{}');
+            const charts = analysisData.chartSuggestions || [];
+            
+            if (charts.length > 0) {
+                const generateAndEmbedCharts = async (text, chartConfigs) => {
+                    let newText = text;
+                    const chartPromises = chartConfigs.map(async (config, index) => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 800;
+                        canvas.height = 450;
+                        const styledConfig = ensureChartStyling(config);
+                        new Chart(canvas, styledConfig);
+                        // Wait for chart to render
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        return { dataUrl: canvas.toDataURL('image/png'), index };
+                    });
+                    
+                    const dataUrls = await Promise.all(chartPromises);
+
+                    dataUrls.forEach(({ dataUrl, index }) => {
+                        const placeholder = `[CHART_${index + 1}]`;
+                        const imgTag = `<img src="${dataUrl}" alt="Chart ${index + 1}" style="max-width: 80%; height: auto; display: block; margin: 1rem auto;" />`;
+                        newText = newText.replace(placeholder, imgTag);
+                    });
+                    return newText;
+                };
+
+                const placeholderPrompt = `You are the Formatter agent. The user's research paper draft is below. Your task is to identify the best places in the 'Results' section to insert placeholders for ${charts.length} chart(s). Use the format [CHART_1], [CHART_2], etc. Do not add captions. Only output the modified Markdown text.\n\nDraft:\n${currentDraft}`;
+                const placeholderResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: placeholderPrompt });
+                currentDraft = await generateAndEmbedCharts(placeholderResponse.text, charts);
+
+            }
+            addLog('Formatter', 'Final document prepared.');
+            setAgenticRun(prev => ({ ...prev, status: 'success', iterations: 4 }));
+        
+        } catch (error) {
+            addToast(parseGeminiError(error, "Agentic generation failed."), 'danger');
+            setAgenticRun(prev => ({ ...prev, status: 'failed' }));
+        } finally {
+            if (currentDraft) {
+                updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 10: { ...stepData, output: currentDraft } } });
+            }
+            setIsLoading(false);
+        }
+    };
+    
+    if (isLoading) {
+        return <AgenticAnalysisView agenticRun={{...agenticRun, maxIterations: 4}} />;
+    }
+
+    if (!publicationText) {
+        return (
+            <div className="text-center p-5">
+                <h5 className="fw-bold">Ready to Assemble Your Publication</h5>
+                <p className="text-white-50">Choose a method to generate your final paper.</p>
+                <div className="d-flex justify-content-center gap-2">
+                    <button className="btn btn-primary" onClick={() => handleManualGenerate()}>
+                        <i className="bi bi-person-fill me-1"></i> Manual Generation
+                    </button>
+                    <button className="btn btn-secondary" onClick={handleAgenticGeneration}>
+                        <i className="bi bi-robot me-1"></i> Use Agentic Workflow
+                    </button>
                 </div>
             </div>
-            <button className="btn btn-primary btn-lg" onClick={handleGeneratePublication}>
-                <i className="bi bi-stars me-1"></i> Generate Paper with AI Agents
-            </button>
-        </div>
-    );
-
-    const renderGeneratingScreen = () => (
-        <div className="p-4">
-            <h5 className="fw-bold text-center">AI Agents at Work...</h5>
-            <p className="text-white-50 text-center">An agentic workflow is simulating writing and refining your paper.</p>
-            <div className="progress my-3" style={{height: '20px'}}>
-                <div 
-                    className="progress-bar progress-bar-striped progress-bar-animated" 
-                    style={{ width: `${progress.percent}%` }}
-                >{Math.round(progress.percent)}%</div>
-            </div>
-            <p className="text-center fw-bold">{progress.status}</p>
-            <div className="generated-text-container mt-3" style={{minHeight: '200px', maxHeight: '400px', overflowY: 'auto'}}>
-                 <div dangerouslySetInnerHTML={{ __html: marked(publicationText) }} />
-            </div>
-        </div>
-    );
-
-    const renderCompleteScreen = () => (
+        );
+    }
+    
+    return (
         <FinalPublicationView 
-            publicationText={publicationText}
+            publicationText={publicationText} 
             experimentTitle={activeExperiment.title}
             experimentId={activeExperiment.id}
-            onRegenerate={() => setGenerationState('tuning')}
-            showRegenerate={true}
+            onRegenerate={handleAgenticGeneration}
         />
     );
+};
 
-    switch (generationState) {
-        case 'generating': return renderGeneratingScreen();
-        case 'complete': return renderCompleteScreen();
-        case 'tuning':
-        default: return renderTuningScreen();
-    }
+
+const ProjectCompletionView = () => {
+    const { activeExperiment } = useExperiment();
+    
+    // Check if step 10 has output to show the deploy modal trigger
+    const isDeployable = activeExperiment && activeExperiment.stepData[10]?.output;
+    
+    return (
+        <div className="text-center p-5">
+            <i className="bi bi-award-fill" style={{fontSize: '3rem', color: 'var(--primary-glow)'}}></i>
+            <h3 className="mt-3">Research Project Complete!</h3>
+            <p className="text-white-50">Congratulations on completing all 10 steps of your research project.</p>
+            {isDeployable ? (
+                 <p>You can now finalize and export your work from the dashboard.</p>
+            ) : (
+                <p>Complete Step 10 to enable final deployment and sharing options from the dashboard.</p>
+            )}
+        </div>
+    );
 };
 
 const FineTuneModal = ({ stepId, onClose }) => {
     const { activeExperiment, updateExperiment } = useExperiment();
-    const params = STEP_SPECIFIC_TUNING_PARAMETERS[stepId] || [];
+    const { addToast } = useToast();
     const [settings, setSettings] = useState(activeExperiment.fineTuneSettings[stepId] || {});
+    const parameters = STEP_SPECIFIC_TUNING_PARAMETERS[stepId] || [];
 
-    useEffect(() => {
-        // Initialize Bootstrap tooltips
-        const tooltipTriggerList = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-        const tooltipList = tooltipTriggerList.map(tooltipTriggerEl => new (window as any).bootstrap.Tooltip(tooltipTriggerEl));
-
-        // Cleanup function to destroy tooltips when the modal closes
-        return () => {
-            tooltipList.forEach(tooltip => tooltip.dispose());
-        };
-    }, []); // Empty dependency array ensures this runs only once when the modal mounts
-
-
-    const handleSave = () => {
-        const updatedFineTuneSettings = { ...activeExperiment.fineTuneSettings, [stepId]: settings };
-        updateExperiment({ ...activeExperiment, fineTuneSettings: updatedFineTuneSettings });
-        onClose();
-    };
-
-    const handleChange = (name, value) => {
+    const handleSettingChange = (name, value) => {
         setSettings(prev => ({ ...prev, [name]: value }));
     };
 
-    const renderInput = (param) => {
-        const value = settings[param.name] ?? param.default;
-        switch (param.type) {
-            case 'select':
-                return <select className="form-select" value={value} onChange={e => handleChange(param.name, e.target.value)}>{param.options.map(o => <option key={o} value={o}>{o}</option>)}</select>;
-            case 'range':
-                return <div className="d-flex align-items-center"><input type="range" className="form-range" {...param} value={value} onChange={e => handleChange(param.name, parseFloat(e.target.value))} /><span className="temperature-slider-label">{value}</span></div>;
-            case 'boolean':
-                return <div className="form-check form-switch"><input className="form-check-input" type="checkbox" role="switch" checked={!!value} onChange={e => handleChange(param.name, e.target.checked)} /></div>;
-            default:
-                return <input type="text" className="form-control" value={value} onChange={e => handleChange(param.name, e.target.value)} />;
-        }
+    const handleSave = () => {
+        updateExperiment({
+            ...activeExperiment,
+            fineTuneSettings: { ...activeExperiment.fineTuneSettings, [stepId]: settings }
+        });
+        addToast("AI settings saved for this step.", "success");
+        onClose();
     };
-    
+
+    const handleReset = () => {
+        const defaultSettings = {};
+        parameters.forEach(p => defaultSettings[p.name] = p.default);
+        setSettings(defaultSettings);
+        addToast("Settings reset to default.", "info");
+    }
+
     return (
         <div className="modal" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
             <div className="modal-dialog modal-dialog-centered">
                 <div className="modal-content">
                     <div className="modal-header">
-                        <h5 className="modal-title">Fine-Tune AI for "{WORKFLOW_STEPS[stepId - 1].title}"</h5>
+                        <h5 className="modal-title"><i className="bi bi-sliders me-2"></i>Fine-Tune AI for Step {stepId}</h5>
                         <button type="button" className="btn-close" onClick={onClose}></button>
                     </div>
                     <div className="modal-body">
-                         {params.length > 0 ? params.map(param => (
+                        {parameters.length > 0 ? parameters.map(param => (
                             <div className="mb-3" key={param.name}>
-                                <label className="form-label fw-bold d-flex align-items-center">
-                                    {param.label}
-                                    <i 
-                                        className="bi bi-question-circle-fill ms-2 text-white-50" 
-                                        style={{ cursor: 'pointer', fontSize: '0.9rem' }}
-                                        data-bs-toggle="tooltip" 
-                                        data-bs-placement="right" 
-                                        title={param.description}>
-                                    </i>
-                                </label>
-                                {renderInput(param)}
+                                <label htmlFor={param.name} className="form-label fw-bold">{param.label}</label>
+                                {param.type === 'select' && (
+                                    <select
+                                        id={param.name}
+                                        className="form-select"
+                                        value={settings[param.name] ?? param.default}
+                                        onChange={(e) => handleSettingChange(param.name, e.target.value)}
+                                    >
+                                        {param.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                    </select>
+                                )}
+                                 {param.type === 'range' && (
+                                     <div className="d-flex align-items-center">
+                                        <input
+                                            type="range"
+                                            id={param.name}
+                                            className="form-range"
+                                            min={param.min}
+                                            max={param.max}
+                                            step={param.step}
+                                            value={settings[param.name] ?? param.default}
+                                            // FIX: The value from a range input's event is a string. It must be parsed as a number.
+                                            onChange={(e) => handleSettingChange(param.name, parseFloat(e.target.value))}
+                                        />
+                                         <span className="ms-2 temperature-slider-label">{settings[param.name]?.toFixed(1) ?? param.default.toFixed(1)}</span>
+                                     </div>
+                                )}
+                                {param.type === 'boolean' && (
+                                    <div className="form-check form-switch">
+                                        <input
+                                            className="form-check-input"
+                                            type="checkbox"
+                                            id={param.name}
+                                            checked={settings[param.name] ?? param.default}
+                                            onChange={(e) => handleSettingChange(param.name, e.target.checked)}
+                                        />
+                                        <label className="form-check-label" htmlFor={param.name}>Enable</label>
+                                    </div>
+                                )}
+                                <div className="form-text">{param.description}</div>
                             </div>
                         )) : <p>No specific tuning parameters available for this step.</p>}
-                         <div className="mb-3">
-                             <label className="form-label fw-bold d-flex align-items-center">
-                                Temperature
-                                 <i 
-                                    className="bi bi-question-circle-fill ms-2 text-white-50" 
-                                    style={{ cursor: 'pointer', fontSize: '0.9rem' }}
-                                    data-bs-toggle="tooltip" 
-                                    data-bs-placement="right" 
-                                    title="Controls randomness in the AI's response. Lower values (e.g., 0.2) make the output more deterministic and focused, while higher values (e.g., 0.8) make it more creative and diverse.">
-                                </i>
-                            </label>
-                             <div className="d-flex align-items-center">
-                                 <input type="range" className="form-range" min="0" max="1" step="0.1" value={settings.temperature ?? 0.5} onChange={e => handleChange('temperature', parseFloat(e.target.value))} />
-                                 <span className="temperature-slider-label">{settings.temperature ?? 0.5}</span>
-                             </div>
-                         </div>
+                        
+                        <div className="mb-3">
+                            <label htmlFor="temperature" className="form-label fw-bold">Temperature</label>
+                            <div className="d-flex align-items-center">
+                                <input
+                                    type="range"
+                                    id="temperature"
+                                    className="form-range"
+                                    min="0"
+                                    max="1"
+                                    step="0.1"
+                                    value={settings.temperature ?? 0.7}
+                                    onChange={(e) => handleSettingChange('temperature', parseFloat(e.target.value))}
+                                />
+                                <span className="ms-2 temperature-slider-label">{(settings.temperature ?? 0.7).toFixed(1)}</span>
+                            </div>
+                            <div className="form-text">Controls randomness. Lower values are more deterministic.</div>
+                        </div>
+
                     </div>
                     <div className="modal-footer">
+                        <button type="button" className="btn btn-outline-secondary me-auto" onClick={handleReset}>Reset to Defaults</button>
                         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
                         <button type="button" className="btn btn-primary" onClick={handleSave}>Save Settings</button>
                     </div>
@@ -2191,116 +2264,8 @@ const FineTuneModal = ({ stepId, onClose }) => {
     );
 };
 
-const ProjectCompletionView = () => {
-    const { activeExperiment } = useExperiment();
-    const { addToast } = useToast();
-    const finalPublication = activeExperiment.stepData[10]?.output;
 
-    const handleDownload = () => {
-        let fullReport = `# ${activeExperiment.title}\n\n`;
-        fullReport += `**Field:** ${activeExperiment.field}\n`;
-        fullReport += `**Description:** ${activeExperiment.description}\n\n---\n\n`;
-
-        WORKFLOW_STEPS.forEach(step => {
-            const stepData = activeExperiment.stepData[step.id];
-            fullReport += `## Step ${step.id}: ${step.title}\n\n`;
-            if (stepData?.output) {
-                // For JSON steps, stringify it nicely for the markdown file
-                if ([1, 2, 7].includes(step.id)) {
-                    try {
-                        const parsed = JSON.parse(stepData.output.replace(/```json/g, '').replace(/```/g, '').trim());
-                        fullReport += "```json\n" + JSON.stringify(parsed, null, 2) + "\n```\n\n";
-                    } catch (e) {
-                        fullReport += `${stepData.output}\n\n`; // fallback to raw text
-                    }
-                } else {
-                    fullReport += `${stepData.output}\n\n`;
-                }
-            } else {
-                fullReport += `*No output generated for this step.*\n\n`;
-            }
-        });
-
-        const blob = new Blob([fullReport], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${activeExperiment.title.replace(/\s+/g, '_')}_Full_Project_Report.md`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        addToast("Full project report downloaded!", "success");
-    };
-
-    const renderStepOutput = (stepId) => {
-        const output = activeExperiment.stepData[stepId]?.output;
-        if (!output) return <p className="text-white-50">No output was generated for this step.</p>;
-
-        if ([1, 2, 7].includes(stepId)) {
-            // Reuse the parser logic from GeneratedOutput for consistent display
-            try {
-                const sanitizedText = output.replace(/```json/g, '').replace(/```/g, '').trim();
-                const data = JSON.parse(sanitizedText);
-                if (stepId === 1) return <div><div dangerouslySetInnerHTML={{ __html: marked(data.research_question) }} /><UniquenessMeter score={data.uniqueness_score} justification={data.justification} /></div>;
-                if (stepId === 2) return <div><div dangerouslySetInnerHTML={{ __html: marked(data.summary) }} /><h5>References</h5>...</div>; // Abridged for brevity
-                if (stepId === 7) return <DataAnalysisView analysisData={data} />;
-            } catch (e) {
-                return <pre><code>{output}</code></pre>;
-            }
-        }
-        return <div dangerouslySetInnerHTML={{ __html: marked(output) }} />;
-    };
-
-    return (
-        <div className="p-4">
-            <div className="text-center">
-                <h3><i className="bi bi-award-fill text-warning me-2"></i>Project Complete!</h3>
-                <p className="text-white-50">Congratulations on completing your research project. You can review all generated content below or download a full report.</p>
-                <button className="btn btn-primary" onClick={handleDownload}>
-                    <i className="bi bi-download me-2"></i> Download Full Project Report (Markdown)
-                </button>
-            </div>
-            
-            {finalPublication && (
-                <div className="card mt-4">
-                    <div className="card-body">
-                        <FinalPublicationView 
-                            publicationText={finalPublication} 
-                            experimentTitle={activeExperiment.title}
-                            experimentId={activeExperiment.id}
-                            onRegenerate={() => { /* This view is read-only */ }}
-                            showRegenerate={false}
-                        />
-                    </div>
-                </div>
-            )}
-
-            <div className="text-start mt-4">
-                <h4 className="text-center mb-3">Full Project Log</h4>
-                <div className="accordion" id="projectSummaryAccordion">
-                    {WORKFLOW_STEPS.map(step => (
-                        <div className="accordion-item" key={step.id}>
-                            <h2 className="accordion-header" id={`heading-${step.id}`}>
-                                <button className="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target={`#collapse-${step.id}`}>
-                                    Step {step.id}: {step.title}
-                                </button>
-                            </h2>
-                            <div id={`collapse-${step.id}`} className="accordion-collapse collapse" data-bs-parent="#projectSummaryAccordion">
-                                <div className="accordion-body generated-text-container">
-                                    {renderStepOutput(step.id)}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-
-// --- MAIN RENDER ---
+// --- RENDER APPLICATION ---
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 root.render(
     <React.StrictMode>

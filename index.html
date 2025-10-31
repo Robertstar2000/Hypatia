@@ -583,6 +583,39 @@
         .archived-project-card:hover {
             opacity: 1;
         }
+        /* Agentic Workflow Log Styling */
+        .agent-log-container {
+            background: #0c0d18;
+            color: #ccc;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 0.25rem;
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85em;
+        }
+        .agent-log-entry {
+            margin-bottom: 0.5rem;
+            padding-left: 1rem;
+            border-left: 2px solid #555;
+        }
+        .agent-log-agent {
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        .agent-log-system .agent-log-agent { color: #888; }
+        .agent-log-system { border-color: #888; }
+        .agent-log-manager .agent-log-agent { color: var(--primary-glow); }
+        .agent-log-manager { border-color: var(--primary-glow); }
+        .agent-log-doer .agent-log-agent { color: #ffc107; }
+        .agent-log-doer { border-color: #ffc107; }
+        .agent-log-qa .agent-log-agent { color: #fd7e14; }
+        .agent-log-qa { border-color: #fd7e14; }
+        .agent-log-message {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
     </style>
 <script type="importmap">
 {

@@ -1,6 +1,5 @@
 
 
-
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -75,7 +74,8 @@ export const testApiKey = async (apiKey: string): Promise<boolean> => {
 };
 
 
-export const getStepContext = (experiment: Experiment, stepId: number): object => {
+// FIX: Changed return type from `object` to `any` to allow for accessing dynamically added properties without TypeScript errors.
+export const getStepContext = (experiment: Experiment, stepId: number): any => {
     const context: any = { experimentField: experiment.field };
     const data = experiment.stepData || {};
 
@@ -178,7 +178,7 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
     switch (stepId) {
         case 1:
             expectJson = true;
-            basePrompt += `The user's initial idea is: "${userInput}". Based on this, formulate a clear, focused, and testable research question. Also, provide a 'uniqueness_score' from 0.0 (very common) to 1.0 (highly novel) and a brief 'justification' for the score. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
+            basePrompt += `The user's initial idea is: "${userInput}". Based on this, formulate a clear, focused, and testable research question. You must also provide a 'uniqueness_score' and a 'justification'. To determine the 'uniqueness_score' from 0.0 (very common) to 1.0 (highly novel), you MUST assess the novelty of the core idea against your vast knowledge base. A score near 0.0 indicates the topic is foundational or extensively studied (e.g., 'the effects of gravity on apples'). A score near 1.0 indicates the idea is highly original, interdisciplinary, or explores a significant, unaddressed gap (e.g., 'using quantum entanglement to model fungal communication'). Your justification MUST briefly explain your reasoning for the score by referencing the density of existing information on the topic. A score of exactly 0.5 should only be used for ideas of truly average novelty; avoid defaulting to this value and use the full 0.0-1.0 range. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
             config.responseMimeType = "application/json";
             config.responseSchema = RESEARCH_QUESTION_SCHEMA;
             break;
@@ -202,16 +202,16 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
         case 7: // Data Analyzer
             expectJson = true;
             config.responseMimeType = "application/json";
-            
-            if (settings.isAutomated) { // Automated mode: one-shot analysis
-                 config.responseSchema = DATA_ANALYZER_SCHEMA;
-                basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration in the specified JSON format that conforms to the required schema. Your output must be ONLY the raw JSON object.`;
-            } else if (settings.analysisStage === 'suggest_methods') { // Manual mode, stage 1
+            config.responseSchema = DATA_ANALYZER_SCHEMA;
+            const jsonInstructions = "Your final output must be ONLY a single, raw JSON object that conforms to the required schema. Do not include any text, explanations, or markdown fences. The 'chartSuggestions' array should only contain configurations for 'bar' or 'line' charts. If a table is more appropriate, describe it in the summary using Markdown. Ensure that within each chart configuration, 'data.datasets' is an array of objects and each 'dataset.data' is an array of numbers.";
+
+            if (settings.isAutomated) { // This is now used for the initial goal-setting call
+                basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
+            } else if (settings.analysisStage === 'suggest_methods') { // This is now deprecated by the agentic workflow but kept for structure
                 config.responseSchema = STATISTICAL_METHODS_SCHEMA;
-                basePrompt += `Based on the data collection plan: "${context.data_collection_plan_summary}" and a preview of the data (first few rows): \n\`\`\`\n${context.experiment_data_csv}\n\`\`\`\nSuggest 3 to 5 appropriate statistical analysis methods. For each method, provide a brief description of what it's used for. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
-            } else { // Manual mode, stage 2
-                config.responseSchema = DATA_ANALYZER_SCHEMA;
-                basePrompt += `The user has selected the '${settings.selectedMethod || 'default'}' analysis method. Analyze the following data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration in the specified JSON format. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
+                basePrompt += `Based on the data collection plan: "${context.data_collection_plan_summary}" and a preview of the data: \n\`\`\`\n${context.experiment_data_csv}\n\`\`\`\nSuggest 3 to 5 appropriate statistical analysis methods. For each method, provide a brief description. Your final output must be ONLY a single, raw JSON object.`;
+            } else { // Fallback/default for the main agentic process trigger
+                 basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
             }
             break;
         case 8:

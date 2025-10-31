@@ -1,3 +1,4 @@
+
 import type { Dispatch, SetStateAction } from 'react';
 import { Type } from "@google/genai";
 import { GoogleGenAI } from "@google/genai";
@@ -68,7 +69,12 @@ export const SCIENTIFIC_FIELDS = [
     "Sociology",
     "Economics",
     "Mathematics",
-    "Neuroscience"
+    "Neuroscience",
+    "Biochemistry",
+    "Genetics",
+    "Ecology",
+    "Statistics",
+    "Political Science"
 ] as const;
 
 
@@ -233,13 +239,13 @@ export const DATA_ANALYZER_SCHEMA = {
         },
         chartSuggestions: {
             type: Type.ARRAY,
-            description: "An array of chart configurations suggested for visualizing the data. Each object should be a valid Chart.js configuration.",
+            description: "An array of chart configurations for visualizing the data. Each object must be a valid Chart.js configuration. Suggested chart types should be limited to 'bar' or 'line'.",
             items: {
                 type: Type.OBJECT,
                 properties: {
                     type: {
                         type: Type.STRING,
-                        description: "The type of chart (e.g., 'bar', 'line', 'pie', 'scatter')."
+                        description: "The type of chart (must be 'bar' or 'line')."
                     },
                     data: {
                         type: Type.OBJECT,
@@ -257,6 +263,7 @@ export const DATA_ANALYZER_SCHEMA = {
                                         label: { type: Type.STRING },
                                         data: {
                                             type: Type.ARRAY,
+                                            description: "An array of numerical data points for the chart. Must contain numbers.",
                                             items: { type: Type.NUMBER }
                                         },
                                         backgroundColor: {

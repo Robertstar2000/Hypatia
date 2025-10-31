@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useExperiment } from './index.tsx';
+// Fix: Correctly import useExperiment from its context file.
+import { useExperiment } from './context/ExperimentContext';
 import { useToast } from './toast';
 import { parseGeminiError } from './be_gemini';
 

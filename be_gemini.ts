@@ -37,9 +37,20 @@ export const initializeGemini = (): GoogleGenAI | null => {
 
 export const parseGeminiError = (error: any, fallbackMessage: string = "An unknown error occurred."): string => {
     console.error("Gemini API Error:", error);
+
+    // Check for the structured error response from Gemini
     if (error?.error?.message) {
-        return error.error.message;
+        const errorCode = error.error.code;
+        const errorMessage = error.error.message;
+
+        // Handle specific server-side 500 errors with a more user-friendly message
+        if (errorCode === 500 || errorMessage.includes('Internal error')) {
+            return 'The AI model encountered an internal error. This is usually a temporary issue. Please try again in a few moments.';
+        }
+        return errorMessage; // Return other specific messages from the API
     }
+    
+    // Fallback to checking string content for other types of errors (e.g., from the client library)
     const message = error?.message || '';
     if (message.includes('API key not valid')) {
         return 'API Key is not valid. Please check your key and try again.';
@@ -47,12 +58,13 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
     if (message.includes('429')) { // Too Many Requests
         return 'You have made too many requests in a short period. Please wait a moment and try again.';
     }
-    if (message.includes('503')) { // Service Unavailable
-        return 'The service is temporarily unavailable. Please try again later.';
+    if (message.includes('503')) { // Service Unavailable or internal server error from client library
+        return 'The AI service is temporarily unavailable or experiencing issues. Please try again later.';
     }
     if (message.includes('fetch failed') || message.includes('NetworkError')) {
         return 'A network error occurred. Please check your internet connection.';
     }
+    
     return fallbackMessage;
 };
 
@@ -178,13 +190,25 @@ export const getPromptForStep = (stepId: number, userInput: string, context: any
     switch (stepId) {
         case 1:
             expectJson = true;
-            basePrompt += `The user's initial idea is: "${userInput}". Based on this, formulate a clear, focused, and testable research question. You must also provide a 'uniqueness_score' and a 'justification'. To determine the 'uniqueness_score' from 0.0 (very common) to 1.0 (highly novel), you MUST assess the novelty of the core idea against your vast knowledge base. A score near 0.0 indicates the topic is foundational or extensively studied (e.g., 'the effects of gravity on apples'). A score near 1.0 indicates the idea is highly original, interdisciplinary, or explores a significant, unaddressed gap (e.g., 'using quantum entanglement to model fungal communication'). Your justification MUST briefly explain your reasoning for the score by referencing the density of existing information on the topic. A score of exactly 0.5 should only be used for ideas of truly average novelty; avoid defaulting to this value and use the full 0.0-1.0 range. Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
+            basePrompt += `The user's initial idea is: "${userInput}". Your tasks are to:
+1. Formulate a clear, focused, and testable research question from this idea.
+2. Provide a 'uniqueness_score' from 0.0 to 1.0 and a 'justification'.
+
+To determine the 'uniqueness_score', you MUST assess the density of existing, published information on the topic within your vast knowledge base. The score is inversely proportional to the amount of information available:
+- If you find a VAST amount of information (the topic is foundational or extensively studied, like 'the effects of gravity'), the score must be very low, around 0.05.
+- If you find essentially NO information (the idea is completely novel or a new intersection of fields), the score must be 1.0.
+- If you find LITTLE information (the topic is niche, emerging, or has few studies), the score should be high (e.g., 0.8 or above).
+- Use the full range between 0.05 and 1.0 to represent the spectrum of information density.
+
+Your justification MUST briefly explain your reasoning for the score by referencing the density and type of information you found (or didn't find).
+
+Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
             config.responseMimeType = "application/json";
             config.responseSchema = RESEARCH_QUESTION_SCHEMA;
             break;
         case 2:
             expectJson = true;
-            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool. Your final output must be ONLY a single JSON object inside a markdown code block (e.g., \`\`\`json\n{...}\n\`\`\`). Do not include any other text or explanations. The JSON object must contain a 'summary' key (with a markdown string value) and a 'references' key (with an array of objects, where each object has 'title', 'authors' (as an array of strings), 'year' (as a number), 'journal', and 'url' keys).`;
+            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool. Your final output must be ONLY a single, valid JSON object inside a markdown code block (e.g., \`\`\`json\n{...}\n\`\`\`). Do not include any other text or explanations. The JSON must be strictly valid: all property names (keys) must be enclosed in double quotes. The JSON object must contain a 'summary' key (with a markdown string value) and a 'references' key (with an array of objects, where each object has 'title', 'authors' (as an array of strings), 'year' (as a number), 'journal', and 'url' keys).`;
             config.tools = [{ googleSearch: {} }];
             break;
         case 3:

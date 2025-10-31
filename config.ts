@@ -202,6 +202,49 @@ export const LITERATURE_REVIEW_SCHEMA = {
 };
 
 /**
+ * @const QA_AGENT_SCHEMA
+ * Schema for Step 7's agentic QA step to enforce a structured response.
+ */
+export const QA_AGENT_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        pass: {
+            type: Type.BOOLEAN,
+            description: "Whether the Chart.js JSON passes validation."
+        },
+        feedback: {
+            type: Type.STRING,
+            description: "Concise feedback for the Doer agent, explaining why it passed or failed."
+        }
+    },
+    required: ["pass", "feedback"]
+};
+
+/**
+ * @const DYNAMIC_TABLE_SCHEMA
+ * Schema for generating a dynamic table structure for manual data entry.
+ */
+export const DYNAMIC_TABLE_SCHEMA = {
+    type: Type.ARRAY,
+    description: "An array of objects representing column headers and their suggested data types for a data entry table.",
+    items: {
+        type: Type.OBJECT,
+        properties: {
+            columnName: {
+                type: Type.STRING,
+                description: "The name of the column header."
+            },
+            dataType: {
+                type: Type.STRING,
+                description: "The suggested data type for this column (e.g., 'number', 'string', 'date')."
+            }
+        },
+        required: ["columnName", "dataType"]
+    }
+};
+
+
+/**
  * @const STATISTICAL_METHODS_SCHEMA
  * New schema for the first stage of Step 7, where the AI suggests analysis methods.
  */

@@ -55,7 +55,7 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
     if (message.includes('API key not valid')) {
         return 'API Key is not valid. Please check your key and try again.';
     }
-    if (message.includes('429')) { // Too Many Requests
+    if (message.includes('429') || message.toLowerCase().includes('too many requests')) {
         return 'You have made too many requests in a short period. Please wait a moment and try again.';
     }
     if (message.includes('503')) { // Service Unavailable or internal server error from client library
@@ -272,6 +272,29 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
  * @returns {Promise<string>} The final, formatted publication text in Markdown.
  */
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
+    
+    const callGeminiWithRetry = async (params, agentName, maxRetries = 5) => {
+        let attempts = 0;
+        let delay = 2000;
+        while (attempts < maxRetries) {
+            try {
+                const response = await gemini.models.generateContent(params);
+                return response.text;
+            } catch (error) {
+                attempts++;
+                const errorMessage = parseGeminiError(error);
+                if (attempts >= maxRetries) {
+                    updateLog('System', `${agentName} failed after ${maxRetries} attempts. Error: ${errorMessage}`);
+                    throw new Error(`${agentName} failed: ${errorMessage}`);
+                }
+                updateLog('System', `${agentName} failed. Retrying in ${delay / 1000}s... (Attempt ${attempts}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2;
+            }
+        }
+        throw new Error(`${agentName} failed to get a response.`);
+    };
+    
     // 1. Get full context and fine-tuning settings
     const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
     const fineTuneSettings = experiment.fineTuneSettings[10] || {};
@@ -283,10 +306,10 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
 
     // 2. Outline
     const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
-    const outlineResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: outlinePrompt });
+    const outlineText = await callGeminiWithRetry({ model: 'gemini-flash-lite-latest', contents: outlinePrompt }, 'Manager');
     let sections;
     try {
-      sections = JSON.parse(outlineResponse.text.replace(/```json/g, '').replace(/```/g, ''));
+      sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
     } catch {
       sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"];
     }
@@ -299,6 +322,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         if (section.toLowerCase() === 'references') continue; // Handle this specifically later
         
         updateLog('Writer', `Drafting ${section}...`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Pacing to avoid rate limits
         
         let sectionPrompt;
         if (section.toLowerCase() === "results") {
@@ -309,8 +333,8 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
              sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
         }
         
-        const sectionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: sectionPrompt });
-        paper += `\n## ${section}\n\n${sectionResponse.text}\n`;
+        const sectionText = await callGeminiWithRetry({ model: 'gemini-flash-lite-latest', contents: sectionPrompt }, 'Writer');
+        paper += `\n## ${section}\n\n${sectionText}\n`;
         updateLog('Writer', `${section} section complete.`);
     }
 
@@ -320,14 +344,13 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     if (chartConfigs.length > 0) {
         updateLog('System', 'Generating chart captions...');
         for (let i = 0; i < chartConfigs.length; i++) {
-            // Defensively access chart properties to prevent crashes from malformed data.
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Pacing to avoid rate limits
             const chartConfig = chartConfigs[i] || {};
             const chartType = chartConfig.type || 'chart';
             const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
 
             const captionPrompt = `Write a descriptive caption for a scientific chart. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
-            const captionResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: captionPrompt });
-            const caption = captionResponse.text;
+            const caption = await callGeminiWithRetry({ model: 'gemini-flash-lite-latest', contents: captionPrompt }, 'Captioner');
             const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
             paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
         }
@@ -342,8 +365,8 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
             if (refs && refs.length > 0) {
                  updateLog('System', `Formatting references in ${referenceStyle} style...`);
                 const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
-                const refsResponse = await gemini.models.generateContent({ model: 'gemini-flash-lite-latest', contents: refsPrompt });
-                paper += `\n## References\n\n${refsResponse.text}`;
+                const refsText = await callGeminiWithRetry({ model: 'gemini-flash-lite-latest', contents: refsPrompt }, 'Bibliographer');
+                paper += `\n## References\n\n${refsText}`;
                 updateLog('System', 'References section complete.');
             }
         } catch (e) {
@@ -354,8 +377,8 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     // 6. Final Polish
     updateLog('Editor', 'Performing final editorial review...');
     const polishPrompt = `You are an editor for a ${scientificField} journal. Review the following paper for flow, consistency, and grammar. The target length is ${pageCount}. Add a title based on the content (as a Level 1 Markdown Header: # Title). Output the final, polished version in Markdown.\n\n${paper}`;
-    const finalResponse = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: polishPrompt });
+    const finalText = await callGeminiWithRetry({ model: 'gemini-2.5-flash', contents: polishPrompt }, 'Editor');
     updateLog('System', 'Publication ready.');
     
-    return finalResponse.text;
+    return finalText;
 };

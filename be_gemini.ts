@@ -3,6 +3,7 @@
 
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -42,7 +43,7 @@ export const callGeminiWithRetry = async (
             return response;
         } catch (error) {
             const errorMessage = error.toString();
-            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429');
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
             
             if (isRateLimitError && attempt < maxRetries - 1) {
                 attempt++;
@@ -76,7 +77,7 @@ export const callGeminiStreamWithRetry = async (
             return stream;
         } catch (error) {
             const errorMessage = error.toString();
-            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429');
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
             
             if (isRateLimitError && attempt < maxRetries - 1) {
                 attempt++;
@@ -135,11 +136,10 @@ export const testApiKey = async (apiKey: string): Promise<boolean> => {
     if (!apiKey) return false;
     try {
         const testGemini = new GoogleGenAI({ apiKey });
-        await testGemini.models.generateContent({
-             model: 'gemini-2.5-flash',
+        await callGeminiWithRetry(testGemini, 'gemini-2.5-flash', {
              contents: 'test',
              config: { thinkingConfig: { thinkingBudget: 0 } }
-        });
+        }, undefined, 2);
         return true;
     } catch (error) {
         console.error("API Key validation failed:", error);
@@ -338,6 +338,8 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
  */
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
     
+    const agentDelay = () => new Promise(resolve => setTimeout(resolve, 1200));
+
     const callAgent = async (params, agentName) => {
         const logCallback = (msg) => updateLog('System', `${agentName} agent: ${msg}`);
         const response = await callGeminiWithRetry(gemini, params.model, { contents: params.contents }, logCallback);
@@ -356,6 +358,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     // 2. Outline
     const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
     const outlineText = await callAgent({ model: 'gemini-flash-lite-latest', contents: outlinePrompt }, 'Manager');
+    await agentDelay();
     let sections;
     try {
       sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
@@ -417,6 +420,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         const sectionText = await callAgent({ model: 'gemini-flash-lite-latest', contents: sectionPrompt }, 'Writer');
         paper += `\n## ${section}\n\n${sectionText}\n`;
         updateLog('Writer', `${section} section complete.`);
+        await agentDelay();
     }
 
     // 4. Generate captions and create final placeholders
@@ -433,6 +437,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
             const caption = await callAgent({ model: 'gemini-flash-lite-latest', contents: captionPrompt }, 'Captioner');
             const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
             paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
+            await agentDelay();
         }
         updateLog('System', 'Captions generated and embedded.');
     }
@@ -448,6 +453,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
                 const refsText = await callAgent({ model: 'gemini-flash-lite-latest', contents: refsPrompt }, 'Bibliographer');
                 paper += `\n## References\n\n${refsText}`;
                 updateLog('System', 'References section complete.');
+                await agentDelay();
             }
         } catch (e) {
             updateLog('System', 'Warning: Could not parse references from literature review step.');

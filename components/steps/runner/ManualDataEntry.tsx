@@ -1,8 +1,9 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useExperiment } from '../../../services';
 import { useToast } from '../../../toast';
-import { parseGeminiError } from '../../../services';
+import { parseGeminiError, callGeminiWithRetry } from '../../../services';
 import { DYNAMIC_TABLE_SCHEMA } from '../../../config';
 
 export const ManualDataEntry = ({ onComplete, context }) => {
@@ -15,7 +16,7 @@ export const ManualDataEntry = ({ onComplete, context }) => {
     useEffect(() => {
         if (gemini) {
             const prompt = `Based on the data collection plan summary: "${context.data_collection_plan_summary}", generate a JSON array of objects. Each object should represent a column for a data entry table and have two keys: "columnName" (string) and "dataType" (string, e.g., 'number', 'string'). For example: [{"columnName": "time_seconds", "dataType": "number"}, {"columnName": "temperature_celsius", "dataType": "number"}]. Output only the raw JSON array.`;
-            gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json", responseSchema: DYNAMIC_TABLE_SCHEMA } })
+            callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt, config: { responseMimeType: "application/json", responseSchema: DYNAMIC_TABLE_SCHEMA } })
                 .then(response => {
                     const schemaArray = JSON.parse(response.text);
                     if (!Array.isArray(schemaArray)) throw new Error("AI response was not a JSON array.");

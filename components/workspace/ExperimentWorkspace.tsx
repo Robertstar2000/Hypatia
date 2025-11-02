@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
@@ -51,7 +53,7 @@ export const ExperimentWorkspace = () => {
         let currentExp = { ...activeExperiment };
     
         for (let i = startStep; i <= WORKFLOW_STEPS.length; i++) {
-            if (currentExp.stepData[i]?.output && currentExp.status !== 'active') continue;
+            if (currentExp.stepData[i]?.output) continue;
     
             setActiveStep(i);
             setIsLoading(true);

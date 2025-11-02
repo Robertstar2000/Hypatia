@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -497,9 +492,14 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
         const managerResponse = await callAgent('gemini-flash-lite-latest', { contents: managerPrompt }, 'Manager');
         let searchQueries = [];
         try {
-            searchQueries = JSON.parse(managerResponse);
+            const sanitizedResponse = managerResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+            searchQueries = JSON.parse(sanitizedResponse);
+            if (!Array.isArray(searchQueries) || !searchQueries.every(q => typeof q === 'string')) {
+                 throw new Error("Manager agent output was not a valid array of strings.");
+            }
             updateLog('Manager', `Search strategy confirmed: ${searchQueries.join(', ')}`);
-        } catch {
+        } catch (e) {
+            updateLog('Manager', `Error parsing search queries: ${e.message}. Raw response: ${managerResponse}`);
             throw new Error("Manager failed to produce valid JSON for search queries.");
         }
         await new Promise(resolve => setTimeout(resolve, 1000)); // Delay

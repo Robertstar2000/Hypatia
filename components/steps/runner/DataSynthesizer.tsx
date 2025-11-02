@@ -1,8 +1,9 @@
 
+
 import React, { useState } from 'react';
 import { useExperiment } from '../../../services';
 import { useToast } from '../../../toast';
-import { parseGeminiError } from '../../../services';
+import { parseGeminiError, callGeminiWithRetry } from '../../../services';
 
 export const DataSynthesizer = ({ onComplete, context }) => {
     const { gemini } = useExperiment();
@@ -18,7 +19,7 @@ export const DataSynthesizer = ({ onComplete, context }) => {
         const prompt = `Based on the methodology summary: "${context.methodology_summary}" and data plan summary: "${context.data_collection_plan_summary}", generate a plausible, estimated, synthetic dataset in CSV format. Output ONLY the CSV data and a brief, one-sentence summary of what the data represents. Separate the summary and the CSV data with '---'.`;
         
         try {
-            const response = await gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+            const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt });
             const [summary, csv] = response.text.split('---').map(s => s.trim());
             if (!summary || !csv) throw new Error("AI response format was incorrect.");
             setResult({ summary, csv });

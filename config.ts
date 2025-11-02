@@ -1,4 +1,5 @@
 
+
 import type { Dispatch, SetStateAction } from 'react';
 import { Type } from "@google/genai";
 import { GoogleGenAI } from "@google/genai";
@@ -247,26 +248,22 @@ export const DYNAMIC_TABLE_SCHEMA = {
 
 
 /**
- * @const STATISTICAL_METHODS_SCHEMA
- * New schema for the first stage of Step 7, where the AI suggests analysis methods.
+ * @const ANALYSIS_DECISION_SCHEMA
+ * New schema for the first agent in Step 7 to decide the best analysis type.
  */
-export const STATISTICAL_METHODS_SCHEMA = {
+export const ANALYSIS_DECISION_SCHEMA = {
     type: Type.OBJECT,
     properties: {
-        methods: {
-            type: Type.ARRAY,
-            description: "An array of suggested statistical methods.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    name: { type: Type.STRING, description: "The name of the statistical method (e.g., 'T-Test', 'Linear Regression')." },
-                    description: { type: Type.STRING, description: "A brief explanation of what the method is used for and why it's suitable." }
-                },
-                required: ["name", "description"]
-            }
+        analysis_type: {
+            type: Type.STRING,
+            description: "The best type of analysis visualization. Must be either 'chart' or 'table'."
+        },
+        goal: {
+            type: Type.STRING,
+            description: "A concise, one-sentence description of the goal for the analysis visualization. For example: 'A bar chart comparing average values' or 'A summary table of key statistics'."
         }
     },
-    required: ["methods"]
+    required: ["analysis_type", "goal"]
 };
 
 
@@ -331,7 +328,7 @@ export const DATA_ANALYZER_SCHEMA = {
     properties: {
         summary: {
             type: Type.STRING,
-            description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format."
+            description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format. This can include Markdown tables if they are the primary visualization."
         },
         chartSuggestions: {
             type: Type.ARRAY,

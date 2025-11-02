@@ -1,4 +1,6 @@
 
+
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -6,7 +8,7 @@ import {
     STEP_SPECIFIC_TUNING_PARAMETERS,
     DATA_ANALYZER_SCHEMA,
     LITERATURE_REVIEW_SCHEMA,
-    STATISTICAL_METHODS_SCHEMA,
+    // FIX: Removed STATISTICAL_METHODS_SCHEMA as it is not defined in config.ts and was used in deprecated code.
     RESEARCH_QUESTION_SCHEMA,
     WORKFLOW_STEPS
 } from './config';
@@ -290,11 +292,9 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
             config.responseSchema = DATA_ANALYZER_SCHEMA;
             const jsonInstructions = "Your final output must be ONLY a single, raw JSON object that conforms to the required schema. Do not include any text, explanations, or markdown fences. The 'chartSuggestions' array should only contain configurations for 'bar' or 'line' charts. If a table is more appropriate, describe it in the summary using Markdown. Ensure that within each chart configuration, 'data.datasets' is an array of objects and each 'dataset.data' is an array of numbers.";
 
+            // FIX: Removed deprecated `else if (settings.analysisStage === 'suggest_methods')` block which caused an error.
             if (settings.isAutomated) { // This is now used for the initial goal-setting call
                 basePrompt += `Analyze the following CSV data from a study in ${context.experimentField}: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
-            } else if (settings.analysisStage === 'suggest_methods') { // This is now deprecated by the agentic workflow but kept for structure
-                config.responseSchema = STATISTICAL_METHODS_SCHEMA;
-                basePrompt += `Based on the data collection plan: "${context.data_collection_plan_summary}" and a preview of the data: \n\`\`\`\n${context.experiment_data_csv}\n\`\`\`\nSuggest 3 to 5 appropriate statistical analysis methods for a study in ${context.experimentField}. For each method, provide a brief description. Your final output must be ONLY a single, raw JSON object.`;
             } else { // Fallback/default for the main agentic process trigger
                  basePrompt += `Analyze the following CSV data from a study in ${context.experimentField}: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
             }
@@ -333,12 +333,16 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
  */
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
     
-    const agentDelay = () => new Promise(resolve => setTimeout(resolve, 1200));
-
-    const callAgent = async (params, agentName) => {
-        const logCallback = (msg) => updateLog('System', `${agentName} agent: ${msg}`);
-        const response = await callGeminiWithRetry(gemini, params.model, { contents: params.contents }, logCallback);
-        return response.text;
+    // A robust, rate-limited agent caller.
+    const callAgent = async (model: string, params: any, agentName: string) => {
+        updateLog(agentName, 'is thinking...');
+        const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
+        const response = await callGeminiWithRetry(gemini, model, params, logCallback);
+        const result = response.text;
+        updateLog(agentName, 'has completed its task.');
+        // Proactive delay to prevent rate limiting on sequential calls.
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return result;
     };
     
     // 1. Get full context and fine-tuning settings
@@ -352,8 +356,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
 
     // 2. Outline
     const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
-    const outlineText = await callAgent({ model: 'gemini-flash-lite-latest', contents: outlinePrompt }, 'Manager');
-    await agentDelay();
+    const outlineText = await callAgent('gemini-flash-lite-latest', { contents: outlinePrompt }, 'Manager');
     let sections;
     try {
       sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
@@ -412,10 +415,9 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
              sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
         }
         
-        const sectionText = await callAgent({ model: 'gemini-flash-lite-latest', contents: sectionPrompt }, 'Writer');
+        const sectionText = await callAgent('gemini-flash-lite-latest', { contents: sectionPrompt }, 'Writer');
         paper += `\n## ${section}\n\n${sectionText}\n`;
         updateLog('Writer', `${section} section complete.`);
-        await agentDelay();
     }
 
     // 4. Generate captions and create final placeholders
@@ -429,10 +431,9 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
             const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
 
             const captionPrompt = `Write a descriptive caption for a scientific chart in the field of ${scientificField}. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
-            const caption = await callAgent({ model: 'gemini-flash-lite-latest', contents: captionPrompt }, 'Captioner');
+            const caption = await callAgent('gemini-flash-lite-latest', { contents: captionPrompt }, 'Captioner');
             const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
             paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
-            await agentDelay();
         }
         updateLog('System', 'Captions generated and embedded.');
     }
@@ -445,10 +446,9 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
             if (refs && refs.length > 0) {
                  updateLog('System', `Formatting references in ${referenceStyle} style...`);
                 const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
-                const refsText = await callAgent({ model: 'gemini-flash-lite-latest', contents: refsPrompt }, 'Bibliographer');
+                const refsText = await callAgent('gemini-flash-lite-latest', { contents: refsPrompt }, 'Bibliographer');
                 paper += `\n## References\n\n${refsText}`;
                 updateLog('System', 'References section complete.');
-                await agentDelay();
             }
         } catch (e) {
             updateLog('System', 'Warning: Could not parse references from literature review step.');
@@ -458,7 +458,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     // 6. Final Polish
     updateLog('Editor', 'Performing final editorial review...');
     const polishPrompt = `You are a helpful scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}. Your goals are to: 1. Add a compelling title (as a Level 1 Markdown Header: # Title). 2. Improve the overall flow, clarity, and grammatical correctness. 3. Ensure a consistent and professional tone. The paper's target length is ${pageCount}. Do not drastically change the scientific content or conclusions. Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
-    const finalText = await callAgent({ model: 'gemini-2.5-flash', contents: polishPrompt }, 'Editor');
+    const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor');
     updateLog('System', 'Publication ready.');
     
     return finalText;
@@ -474,10 +474,16 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
  * @returns {Promise<string>} The final, formatted JSON output.
  */
 export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }) => {
-    const callAgent = async (model, params, agentName) => {
-        const logCallback = (msg) => updateLog('System', `${agentName} agent: ${msg}`);
+    // A robust, rate-limited agent caller.
+    const callAgent = async (model: string, params: any, agentName: string) => {
+        updateLog(agentName, 'is thinking...');
+        const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
         const response = await callGeminiWithRetry(gemini, model, params, logCallback);
-        return response.text;
+        const result = response.text;
+        updateLog(agentName, 'has completed its task.');
+        // Proactive delay to prevent rate limiting on sequential calls.
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return result;
     };
 
     const context = getStepContext(experiment, 2);
@@ -502,7 +508,6 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
             updateLog('Manager', `Error parsing search queries: ${e.message}. Raw response: ${managerResponse}`);
             throw new Error("Manager failed to produce valid JSON for search queries.");
         }
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Delay
 
         // 2. Researcher: Execute search and gather data
         let searchResults = '';
@@ -511,7 +516,6 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
             const researcherPrompt = `Using your search tool, find relevant academic literature for the query: "${query}". Provide a detailed summary of the findings, including any links found.`;
             const searchResult = await callAgent('gemini-2.5-flash', { contents: researcherPrompt, config: { tools: [{ googleSearch: {} }] } }, 'Researcher');
             searchResults += `\n\n--- Results for query: "${query}" ---\n${searchResult}`;
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Delay between searches
         }
         updateLog('Researcher', `All search results collected.`);
 
@@ -525,7 +529,6 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
             }
         }, 'Synthesizer');
         updateLog('Synthesizer', 'Generated new literature review summary and reference list.');
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Delay
 
         // 4. QA: Validate the output
         let qaPass = false;

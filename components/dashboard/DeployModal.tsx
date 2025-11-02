@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { marked } from 'marked';
 import { Experiment } from '../../config';
 import { useToast } from '../../toast';
-import { getStepContext, getPromptForStep, parseGeminiError } from '../../services';
+import { getStepContext, getPromptForStep, parseGeminiError, callGeminiWithRetry } from '../../services';
 
 export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportExperiment, gemini }) => {
     const [isLoading, setIsLoading] = useState(false);
@@ -40,7 +40,7 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
         try {
             const context = getStepContext(experiment, step);
             const { basePrompt, config } = getPromptForStep(step, '', context, {});
-            const response = await gemini.models.generateContent({model: 'gemini-2.5-flash', contents: basePrompt, config});
+            const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: basePrompt, config });
             const newContent = response.text;
             setGeneratedContent(newContent);
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
 
 export const EditableStepInput = ({ stepId }) => {

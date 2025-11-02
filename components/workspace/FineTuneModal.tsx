@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
 import { STEP_SPECIFIC_TUNING_PARAMETERS } from '../../config';
 

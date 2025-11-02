@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
-import { useToast } from '../../toast';
-import { parseGeminiError } from '../../be_gemini';
+import { useExperiment } from '../../../services';
+import { useToast } from '../../../toast';
+import { parseGeminiError } from '../../../services';
 
 export const DataSynthesizer = ({ onComplete, context }) => {
     const { gemini } = useExperiment();

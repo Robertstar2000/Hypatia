@@ -1,8 +1,7 @@
-
 import React, { useState, useMemo } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { Experiment } from '../../config';
-import { ExperimentCard } from './ExperimentCard';
+import { ExperimentCard } from '../steps/ExperimentCard';
 import { DeployModal } from './DeployModal';
 
 export const Dashboard = ({ setView }) => {

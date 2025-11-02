@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
-import { useToast } from '../../toast';
-import { parseGeminiError } from '../../be_gemini';
-import { DYNAMIC_TABLE_SCHEMA } from '../../config';
+import { useExperiment } from '../../../services';
+import { useToast } from '../../../toast';
+import { parseGeminiError } from '../../../services';
+import { DYNAMIC_TABLE_SCHEMA } from '../../../config';
 
 export const ManualDataEntry = ({ onComplete, context }) => {
     const { gemini } = useExperiment();

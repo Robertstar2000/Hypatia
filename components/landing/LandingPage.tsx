@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useToast } from '../../toast';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { ApiKeySection } from './ApiKeySection';
 import { ResearchSummary } from './ResearchSummary';
 import { SCIENTIFIC_FIELDS, WORKFLOW_STEPS } from '../../config';

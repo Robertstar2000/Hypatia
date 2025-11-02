@@ -199,7 +199,8 @@ export const LITERATURE_REVIEW_SCHEMA = {
                 required: ["title", "authors", "year"]
             }
         }
-    }
+    },
+    required: ["summary", "references"]
 };
 
 /**

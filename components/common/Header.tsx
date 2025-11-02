@@ -1,29 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
+import React, { useState } from 'react';
+import { useExperiment } from '../../services';
 import { HelpModal } from './HelpModal';
 
 export const Header = ({ setView, activeView, onToggleNotebook }) => {
     const [showHelp, setShowHelp] = useState(false);
-    const [helpContent, setHelpContent] = useState('');
     const { gemini } = useExperiment();
 
-    useEffect(() => {
-        if (showHelp && !helpContent) {
-            fetch('/help.md')
-                .then(response => response.ok ? response.text() : Promise.reject('Failed to load'))
-                .then(text => setHelpContent(text))
-                .catch(err => {
-                    console.error("Failed to load help.md:", err);
-                    setHelpContent("# Error\n\nCould not load help content.");
-                });
-        }
-    }, [showHelp, helpContent]);
+    const handleHelpClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setShowHelp(true);
+    };
 
     return (
         <>
             <nav className="navbar navbar-expand-lg navbar-dark sticky-top">
                 <div className="container-fluid">
-                    <a className="navbar-brand fw-bold" href="#" onClick={() => setView('landing')}>
+                    <a className="navbar-brand fw-bold" href="#" onClick={(e) => { e.preventDefault(); setView('landing'); }}>
                         <i className="bi bi-stars me-2" style={{color: 'var(--primary-glow)'}}></i>
                         Project Hypatia
                     </a>
@@ -40,14 +32,14 @@ export const Header = ({ setView, activeView, onToggleNotebook }) => {
                              {activeView !== 'landing' && (
                                 <>
                                 <li className="nav-item">
-                                    <a className="nav-link" href="#" onClick={onToggleNotebook}>
+                                    <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); onToggleNotebook(); }}>
                                         <i className="bi bi-journal-bookmark-fill me-1"></i> Lab Notebook
                                     </a>
                                 </li>
                                 </>
                             )}
                              <li className="nav-item">
-                                <a className="nav-link" href="#" onClick={() => setShowHelp(true)}>
+                                <a className="nav-link" href="#" onClick={handleHelpClick}>
                                     <i className="bi bi-question-circle me-1"></i> Help
                                 </a>
                             </li>
@@ -55,7 +47,7 @@ export const Header = ({ setView, activeView, onToggleNotebook }) => {
                     </div>
                 </div>
             </nav>
-            {showHelp && <HelpModal content={helpContent} onClose={() => setShowHelp(false)} />}
+            {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
         </>
     );
 };

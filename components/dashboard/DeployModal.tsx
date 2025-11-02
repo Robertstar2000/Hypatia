@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { marked } from 'marked';
 import { Experiment } from '../../config';
 import { useToast } from '../../toast';
-import { getStepContext, getPromptForStep, parseGeminiError } from '../../be_gemini';
+import { getStepContext, getPromptForStep, parseGeminiError } from '../../services';
 
 export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportExperiment, gemini }) => {
     const [isLoading, setIsLoading] = useState(false);

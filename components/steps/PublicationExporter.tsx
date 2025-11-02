@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
-import { marked } from 'marked';
+import { renderMarkdown } from '../../utils/markdownRenderer';
 import {
     Chart,
     LineController,
@@ -14,9 +15,9 @@ import {
     Tooltip,
     Title
 } from 'chart.js';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
-import { runPublicationAgent, parseGeminiError } from '../../be_gemini';
+import { runPublicationAgent, parseGeminiError } from '../../services';
 import { AgenticAnalysisView } from '../common/AgenticAnalysisView';
 import { ensureChartStyling } from '../../utils/chartUtils';
 
@@ -43,7 +44,7 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
         const renderContent = async () => {
             if (!publicationText || !contentRef.current) return;
     
-            contentRef.current.innerHTML = "Processing document and rendering charts...";
+            contentRef.current.innerHTML = `<div class="text-center p-3"><div class="spinner-border spinner-border-sm"></div> Rendering document...</div>`;
     
             let processedText = publicationText;
             const chartPlaceholders = publicationText.match(/\[CHART_(\d+):([\s\S]*?)\]/g) || [];
@@ -60,29 +61,38 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
                     const caption = match[2];
     
                     if (chartConfigs[chartIndex]) {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = 800;
-                        canvas.height = 450;
-                        document.body.appendChild(canvas);
-                        canvas.style.display = 'none';
-
                         try {
-                            const dataUrl = await new Promise((resolve, reject) => {
-                                try {
-                                    const chartConfig = chartConfigs[chartIndex];
-                                    const styledConfig = ensureChartStyling(chartConfig);
-        
-                                    // Inject onComplete callback to know when rendering is done
-                                    styledConfig.options.animation = {
-                                        ...(styledConfig.options.animation || {}),
-                                        onComplete: (context) => {
-                                            resolve(context.chart.toBase64Image('image/png'));
-                                        },
-                                    };
-                                    new Chart(canvas, styledConfig);
-                                } catch (e) {
-                                    reject(e);
-                                }
+                            const dataUrl = await new Promise<string>((resolve, reject) => {
+                                const offscreenCanvas = document.createElement('canvas');
+                                offscreenCanvas.width = 800;
+                                offscreenCanvas.height = 450;
+                                const ctx = offscreenCanvas.getContext('2d');
+                                if (!ctx) return reject('Failed to get 2D context');
+
+                                const chartConfig = chartConfigs[chartIndex];
+                                const styledConfig = ensureChartStyling(chartConfig);
+                                
+                                styledConfig.options.animation = false; // Disable animations for instant rendering
+                                
+                                new Chart(ctx, {
+                                    ...styledConfig,
+                                    plugins: [{
+                                        id: 'customCanvasBackgroundColor',
+                                        beforeDraw: (chart) => {
+                                            const ctx = chart.canvas.getContext('2d');
+                                            ctx.save();
+                                            ctx.globalCompositeOperation = 'destination-over';
+                                            ctx.fillStyle = 'white'; // Render on a white background
+                                            ctx.fillRect(0, 0, chart.width, chart.height);
+                                            ctx.restore();
+                                        }
+                                    }]
+                                });
+
+                                // Give a short timeout to ensure rendering is complete before getting data URL
+                                setTimeout(() => {
+                                    resolve(offscreenCanvas.toDataURL('image/png'));
+                                }, 100);
                             });
     
                             const imgTag = `<figure style="text-align: center;"><img src="${dataUrl}" alt="${caption}" style="max-width: 80%; height: auto; display: block; margin: 1rem auto;" /><figcaption style="font-size: 0.9em; color: #aaa; margin-top: 0.5em;">${caption}</figcaption></figure>`;
@@ -90,8 +100,6 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
                         } catch (e) {
                              console.error("Chart rendering for placeholder failed:", placeholder, e);
                              processedText = processedText.replace(placeholder, `<p class="text-danger">[Error rendering chart: ${e.message}]</p>`);
-                        } finally {
-                            canvas.remove();
                         }
                     } else {
                          processedText = processedText.replace(placeholder, `<p class="text-warning">[Chart data for placeholder not found.]</p>`);
@@ -99,7 +107,7 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
                 }
             }
     
-            contentRef.current.innerHTML = marked(processedText);
+            contentRef.current.innerHTML = renderMarkdown(processedText);
         };
     
         renderContent();

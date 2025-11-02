@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
+import { useExperiment } from '../../services';
 import { WORKFLOW_STEPS } from '../../config';
 
 export const ResearchSummary = () => {

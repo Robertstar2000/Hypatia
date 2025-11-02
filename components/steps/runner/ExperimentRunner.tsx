@@ -1,12 +1,13 @@
 
+
 import React, { useState, useMemo } from 'react';
-import { useExperiment } from '../../context/ExperimentContext';
-import { useToast } from '../../toast';
+import { useExperiment } from '../../../services';
+import { useToast } from '../../../toast';
 import { ModeSelection } from './ModeSelection';
 import { CodeSimulator } from './CodeSimulator';
 import { ManualDataEntry } from './ManualDataEntry';
 import { DataSynthesizer } from './DataSynthesizer';
-import { DataUploader } from './DataUploader';
+import { DataUploader } from '../../landing/DataUploader';
 
 type ExperimentMode = 'simulate' | 'manual' | 'synthesize' | 'upload';
 

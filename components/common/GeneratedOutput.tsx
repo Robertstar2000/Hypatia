@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { marked } from 'marked';
-import { useExperiment } from '../../context/ExperimentContext';
+import { renderMarkdown } from '../../utils/markdownRenderer';
+import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
 import { UniquenessMeter } from './UniquenessMeter';
 import { DataAnalysisView } from './DataAnalysisView';
@@ -46,38 +47,57 @@ export const GeneratedOutput: React.FC<{
         try {
             const sanitizedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
             if (!sanitizedText) throw new Error("AI response was empty.");
-            if (!sanitizedText.startsWith('{') || !sanitizedText.endsWith('}')) {
-                 throw new Error("Sanitized text is not a JSON object.");
+            if (!sanitizedText.startsWith('{') && !sanitizedText.startsWith('[')) {
+                 throw new Error("Sanitized text is not a valid JSON object or array.");
             }
             data = JSON.parse(sanitizedText);
             
             // Step 1: Research Question
-            if (stepId === 1 && data.research_question && data.uniqueness_score !== undefined) {
-                 return (
-                    <div>
-                        <div dangerouslySetInnerHTML={{ __html: marked(data.research_question) }} />
-                        <UniquenessMeter score={data.uniqueness_score} justification={data.justification} />
-                    </div>
-                );
-            }
+            if (stepId === 1) {
+                const question = data.research_question || '';
+                const score = data.uniqueness_score;
+                const justification = data.justification || '';
+
+                if (!question) {
+                    throw new Error("Parsed JSON for Step 1 is missing 'research_question'.");
+                }
+
+                return (
+                   <div>
+                       <div dangerouslySetInnerHTML={{ __html: renderMarkdown(question) }} />
+                       {score !== undefined && <UniquenessMeter score={score} justification={justification} />}
+                   </div>
+               );
+           }
 
             // Step 2: Literature Review
-            if (stepId === 2 && data.summary && Array.isArray(data.references)) {
+            if (stepId === 2) {
+                const summary = data.summary || '';
+                const references = Array.isArray(data.references) ? data.references : [];
+                
+                if (!summary && references.length === 0) {
+                    throw new Error("Parsed JSON for Step 2 is missing both 'summary' and 'references'.");
+                }
+
                 return (
                     <div>
-                        <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(data.summary) }} />
-                        <h5 className="mt-4">References</h5>
-                        <ul className="reference-list">
-                            {data.references.map((ref, i) => (
-                                <li key={i} className="reference-item">
-                                    <div className="reference-title">{ref.title}</div>
-                                    <div className="reference-meta">
-                                        <em>{ref.authors.join(', ') || 'N/A'}</em> ({ref.year || 'N/A'}). {ref.journal || ''}
-                                        {ref.url && <a href={ref.url} target="_blank" rel="noopener noreferrer" className="ms-2">[Source]</a>}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
+                        {summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />}
+                        {references.length > 0 && (
+                            <>
+                                <h5 className="mt-4">References</h5>
+                                <ul className="reference-list">
+                                    {references.map((ref, i) => (
+                                        <li key={i} className="reference-item">
+                                            <div className="reference-title">{ref.title}</div>
+                                            <div className="reference-meta">
+                                                <em>{ref.authors?.join(', ') || 'N/A'}</em> ({ref.year || 'N/A'}). {ref.journal || ''}
+                                                {ref.url && <a href={ref.url} target="_blank" rel="noopener noreferrer" className="ms-2">[Source]</a>}
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </>
+                        )}
                     </div>
                 );
             }
@@ -115,6 +135,7 @@ export const GeneratedOutput: React.FC<{
                     <div className="alert alert-warning">
                         <p className="fw-bold">AI response could not be parsed as structured data.</p>
                         <p className="small mb-1">You can still review the raw text below and complete the step. The raw text will be used as the step's output.</p>
+                        <p className="small fst-italic mb-0">Error: {error.message}</p>
                     </div>
                     <pre className="p-2 bg-dark text-white rounded small" style={{whiteSpace: 'pre-wrap'}}><code>{text}</code></pre>
                 </div>
@@ -174,7 +195,7 @@ export const GeneratedOutput: React.FC<{
             {isEditing ? (
                  <textarea className="editable-textarea" value={editText} onChange={(e) => setEditText(e.target.value)} />
             ) : (
-                expectJson ? jsonParser(output) : <div dangerouslySetInnerHTML={{ __html: marked(output) }} />
+                expectJson ? jsonParser(output) : <div dangerouslySetInnerHTML={{ __html: renderMarkdown(output) }} />
             )}
         </div>
     );

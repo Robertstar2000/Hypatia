@@ -12,7 +12,7 @@ import {
     Tooltip,
     Title
 } from 'chart.js';
-import { marked } from 'marked';
+import { renderMarkdown } from '../../utils/markdownRenderer';
 import { ensureChartStyling } from '../../utils/chartUtils';
 
 // Register all the necessary components for Chart.js
@@ -82,7 +82,7 @@ export const DataAnalysisView = ({ analysisData }) => {
 
     return (
         <div>
-            {analysisData.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: marked(analysisData.summary) }} />}
+            {analysisData.summary && <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: renderMarkdown(analysisData.summary) }} />}
             {hasCharts && (
                 <div className="mt-4">
                     <h5 className="fw-bold">Data Visualizations</h5>

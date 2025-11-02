@@ -3,9 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { Experiment } from './config';
 import { db } from './be_db';
-import { testApiKey, parseGeminiError } from './be_gemini';
+import { testApiKey, parseGeminiError } from './services';
 import { useToast } from './toast';
-import { ExperimentContext } from './context/ExperimentContext';
+import { ExperimentContext } from './services';
 
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';

@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
@@ -243,6 +235,13 @@ export const ExperimentWorkspace = () => {
     };
     
     const handleCompleteStep = async () => {
+        // FIX: Add a guard to prevent this function from running for Step 10.
+        // The PublicationExporter component handles its own completion logic,
+        // and a stale call here was causing a navigation bug.
+        if (activeStep === 10) {
+            return;
+        }
+
         if (isLoading || !stepData.output) return;
 
         setIsLoading(true);

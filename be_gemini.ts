@@ -4,6 +4,8 @@
 
 
 
+
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -367,7 +369,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         const result = response.text;
         updateLog(agentName, 'has completed its task.');
         // Proactive delay to prevent rate limiting on sequential calls.
-        await new Promise(resolve => setTimeout(resolve, 6000));
+        await new Promise(resolve => setTimeout(resolve, 10000));
         return result;
     };
     
@@ -482,6 +484,9 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     }
 
     // 6. Final Polish
+    updateLog('System', 'Pausing for 60 seconds to cool down before the final, large editing task to avoid rate limits.');
+    await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
+
     updateLog('Editor', 'Performing final editorial review...');
     const polishPrompt = `You are a helpful scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}. Your goals are to: 1. Add a compelling title (as a Level 1 Markdown Header: # Title). 2. Improve the overall flow, clarity, and grammatical correctness. 3. Ensure a consistent and professional tone. The paper's target length is ${pageCount}. Do not drastically change the scientific content or conclusions. Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
     const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor');

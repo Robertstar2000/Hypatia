@@ -251,7 +251,11 @@ export const PublicationExporter = () => {
             <div className="text-center p-5">
                 <h5 className="fw-bold">Assemble Your Publication</h5>
                 <p className="text-white-50">Use the agentic workflow to build your final paper. The AI will outline, write, and format the entire document, including charts and references.</p>
-                <div className="d-flex justify-content-center gap-2">
+                <div className="alert alert-info small mt-4">
+                    <i className="bi bi-info-circle-fill me-2"></i>
+                    <strong>A Note on Generation Speed:</strong> This process involves multiple, complex AI steps. To ensure high-quality results and avoid API rate limits, especially on large documents, there are intentional delays (up to 60 seconds) between agents. Please be patient, as this step may take several minutes to complete.
+                </div>
+                <div className="d-flex justify-content-center gap-2 mt-3">
                     <button className="btn btn-primary" onClick={startPublicationGeneration}>
                         <i className="bi bi-robot me-1"></i> Generate Publication with Agents
                     </button>

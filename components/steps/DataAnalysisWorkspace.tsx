@@ -114,7 +114,8 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
 
             // Step 4: Assemble and Save
             const finalOutput = JSON.stringify({ summary: finalSummary, chartSuggestions: chartSuggestions });
-            const finalStepData = { ...stepData, output: finalOutput };
+            // Save the concise goal from the Analyst agent to be used as the log summary.
+            const finalStepData = { ...stepData, output: finalOutput, suggestedInput: decision.goal };
             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
             setAgenticRun(prev => ({ ...prev, status: 'success' }));
             addToast("Agentic analysis complete!", "success");

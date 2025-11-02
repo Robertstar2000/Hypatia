@@ -3,6 +3,7 @@
 
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -22,7 +23,23 @@ import {
 // --- GEMINI API SERVICE ---
 
 /**
- * A robust wrapper for Gemini API calls that includes exponential backoff for rate limiting errors.
+ * Wraps any promise with a timeout.
+ * @param geminiCall The promise to execute (e.g., a Gemini API call).
+ * @param timeout The timeout in milliseconds.
+ * @returns The result of the promise or throws a timeout error.
+ */
+const callGeminiWithTimeout = async (geminiCall: Promise<any>, timeout: number = 60000) => {
+    return Promise.race([
+        geminiCall,
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Gemini API call timed out after ${timeout / 1000} seconds.`)), timeout)
+        ),
+    ]);
+};
+
+
+/**
+ * A robust wrapper for Gemini API calls that includes exponential backoff for rate limiting and timeout errors.
  * @param gemini - The initialized GoogleGenAI instance.
  * @param model - The model name to use.
  * @param params - The parameters for the generateContent call.
@@ -41,15 +58,17 @@ export const callGeminiWithRetry = async (
     let delay = 2000; // Start with a 2-second delay
     while (attempt < maxRetries) {
         try {
-            const response = await gemini.models.generateContent({ model, ...params });
+            const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }));
             return response;
         } catch (error) {
             const errorMessage = error.toString();
             const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+            const isTimeoutError = errorMessage.includes('timed out');
             
-            if (isRateLimitError && attempt < maxRetries - 1) {
+            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
-                const logMessage = `Rate limit hit. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
+                const logMessage = `Call ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 delay *= 2; // Exponential backoff
@@ -62,7 +81,7 @@ export const callGeminiWithRetry = async (
 };
 
 /**
- * A robust wrapper for Gemini API streaming calls that includes exponential backoff.
+ * A robust wrapper for Gemini API streaming calls that includes exponential backoff and timeouts.
  */
 export const callGeminiStreamWithRetry = async (
     gemini: GoogleGenAI,
@@ -75,15 +94,17 @@ export const callGeminiStreamWithRetry = async (
     let delay = 2000;
     while (attempt < maxRetries) {
         try {
-            const stream = await gemini.models.generateContentStream({ model, ...params });
+            const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }));
             return stream;
         } catch (error) {
             const errorMessage = error.toString();
             const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+            const isTimeoutError = errorMessage.includes('timed out');
             
-            if (isRateLimitError && attempt < maxRetries - 1) {
+            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
-                const logMessage = `Rate limit hit on streaming call. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
+                const logMessage = `Streaming call ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 delay *= 2;
@@ -100,7 +121,7 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
     console.error("Gemini API Error:", error);
 
     if (error?.message?.includes('Max retries reached')) {
-        return 'The AI service is currently busy. The operation was automatically retried several times but failed. Please try again in a few moments.';
+        return 'The AI service is currently busy or unresponsive. The operation was automatically retried several times but failed. Please try again in a few moments.';
     }
 
     // Check for the structured error response from Gemini

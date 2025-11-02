@@ -4,6 +4,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
@@ -261,7 +263,11 @@ export const ExperimentWorkspace = () => {
                     summaryText = "Research question step completed without an output.";
                 }
             } else if (activeStep === 7 || activeStep === 2) { // Handle JSON steps
-                if (stepData.output) {
+                if (activeStep === 7 && stepData.suggestedInput) {
+                    // For Step 7, we pre-generated a concise summary (the 'goal') during the agentic run.
+                    // Use it directly to avoid a redundant and potentially slow API call.
+                    summaryText = stepData.suggestedInput;
+                } else if (stepData.output) {
                     try {
                         const parsedOutput = JSON.parse(stepData.output.replace(/```json/g, '').replace(/```/g, '').trim());
                         const textToSummarize = parsedOutput.summary;

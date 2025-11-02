@@ -2,6 +2,7 @@
 
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -11,7 +12,10 @@ import {
     LITERATURE_REVIEW_SCHEMA,
     // FIX: Removed STATISTICAL_METHODS_SCHEMA as it is not defined in config.ts and was used in deprecated code.
     RESEARCH_QUESTION_SCHEMA,
-    WORKFLOW_STEPS
+    WORKFLOW_STEPS,
+    QA_AGENT_SCHEMA,
+    CHART_JS_SCHEMA,
+    ANALYSIS_DECISION_SCHEMA
 } from './config';
 
 
@@ -495,7 +499,25 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
         updateLog('System', `--- Iteration ${i + 1} of ${maxIterations} ---`);
 
         // 1. Manager: Create search queries
-        const managerPrompt = `You are a Manager agent. Your task is to create a search query strategy for a literature review on "${context.question}" in the field of ${context.experimentField}. Provide 3 diverse and effective search queries. Output a raw JSON array of strings, e.g., ["query 1", "query 2"].`;
+        const managerPrompt = `You are a Manager agent creating a search strategy for a literature review on "${context.question}" in the field of ${context.experimentField}.
+
+Your task is to generate 3 diverse search queries suitable for a standard web search engine like Google. These are NOT for a scientific database like Scopus or PubMed.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Use Natural Language:** Queries should be simple phrases or questions someone would type into Google.
+2.  **NO Complex Boolean Logic:** You MUST NOT use complex boolean operators like parenthesized (A OR B) AND (C OR D). Avoid operators like NEAR, ADJ, or complex nesting. Simple keyword combinations are fine.
+3.  **Focus on different angles:** Each query should explore a different facet of the research question.
+
+**Example of GOOD queries:**
+- "latest research on UHTC stability above 5000 K"
+- "thermodynamic limits of covalent bonds in ceramics"
+- "computational modeling of high-entropy refractory materials"
+
+**Example of BAD queries (DO NOT DO THIS):**
+- ("atomic-scale engineering" OR "bond network modification") AND ("ultra-high temperature ceramics")
+- (materials science) AND (UHTCs OR "refractory materials") AND (stability > 5000 K)
+
+Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", "query 2", "query 3"]`;
         const managerResponse = await callAgent('gemini-flash-lite-latest', { contents: managerPrompt }, 'Manager');
         let searchQueries = [];
         try {

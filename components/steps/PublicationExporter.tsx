@@ -224,7 +224,15 @@ export const PublicationExporter = () => {
                     setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent, message }] }));
                 }
             });
-            updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 10: { ...stepData, output: finalDoc } } });
+            const updatedExperiment = {
+                ...activeExperiment,
+                stepData: {
+                    ...activeExperiment.stepData,
+                    10: { ...stepData, output: finalDoc }
+                },
+                currentStep: 11
+            };
+            await updateExperiment(updatedExperiment);
             setAgenticRun(prev => ({ ...prev, status: 'success' }));
             addToast("Publication generated successfully!", "success");
 

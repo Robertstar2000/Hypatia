@@ -1,6 +1,7 @@
 
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -341,7 +342,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         const result = response.text;
         updateLog(agentName, 'has completed its task.');
         // Proactive delay to prevent rate limiting on sequential calls.
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 4000));
         return result;
     };
     

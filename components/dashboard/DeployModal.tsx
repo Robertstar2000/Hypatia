@@ -37,6 +37,10 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
 
         setIsLoading(true);
         setGeneratedContent('');
+
+        addToast("Pausing for 4s to ensure API stability...", 'info');
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        
         try {
             const context = getStepContext(experiment, step);
             const { basePrompt, config } = getPromptForStep(step, '', context, {});

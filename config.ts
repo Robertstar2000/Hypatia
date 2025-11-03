@@ -205,25 +205,6 @@ export const LITERATURE_REVIEW_SCHEMA = {
 };
 
 /**
- * @const QA_AGENT_SCHEMA
- * Schema for Step 7's agentic QA step to enforce a structured response.
- */
-export const QA_AGENT_SCHEMA = {
-    type: Type.OBJECT,
-    properties: {
-        pass: {
-            type: Type.BOOLEAN,
-            description: "Whether the Chart.js JSON passes validation."
-        },
-        feedback: {
-            type: Type.STRING,
-            description: "Concise feedback for the Doer agent, explaining why it passed or failed."
-        }
-    },
-    required: ["pass", "feedback"]
-};
-
-/**
  * @const DYNAMIC_TABLE_SCHEMA
  * Schema for generating a dynamic table structure for manual data entry.
  */
@@ -248,22 +229,37 @@ export const DYNAMIC_TABLE_SCHEMA = {
 
 
 /**
- * @const ANALYSIS_DECISION_SCHEMA
- * New schema for the first agent in Step 7 to decide the best analysis type.
+ * @const ANALYSIS_PLAN_SCHEMA
+ * Schema for the new "Manager" agent in Step 7 to create a multi-chart analysis plan.
  */
-export const ANALYSIS_DECISION_SCHEMA = {
+export const ANALYSIS_PLAN_SCHEMA = {
     type: Type.OBJECT,
     properties: {
-        analysis_type: {
-            type: Type.STRING,
-            description: "The best type of analysis visualization. Must be either 'chart' or 'table'."
-        },
-        goal: {
-            type: Type.STRING,
-            description: "A concise, one-sentence description of the goal for the analysis visualization. For example: 'A bar chart comparing average values' or 'A summary table of key statistics'."
+        plan: {
+            type: Type.ARRAY,
+            description: "An array of 2-3 planned visualizations for the data.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    chartType: {
+                        type: Type.STRING,
+                        description: "The type of chart to generate. Must be one of: 'bar', 'line', 'scatter'."
+                    },
+                    goal: {
+                        type: Type.STRING,
+                        description: "A clear, one-sentence description of what this chart should show. This will be used as an instruction for another AI. Be specific about aggregations (e.g., 'average', 'total') and filtering (e.g., 'for the Aged model')."
+                    },
+                    columns: {
+                        type: Type.ARRAY,
+                        description: "The exact column names from the CSV needed to create this chart.",
+                        items: { type: Type.STRING }
+                    }
+                },
+                required: ["chartType", "goal", "columns"]
+            }
         }
     },
-    required: ["analysis_type", "goal"]
+    required: ["plan"]
 };
 
 
@@ -276,13 +272,14 @@ export const CHART_JS_SCHEMA = {
     properties: {
         type: {
             type: Type.STRING,
-            description: "The type of chart (must be 'bar' or 'line')."
+            description: "The type of chart (must be 'bar', 'line', or 'scatter')."
         },
         data: {
             type: Type.OBJECT,
             properties: {
                 labels: {
                     type: Type.ARRAY,
+                    description: "Optional: An array of string labels for the x-axis. Required for 'bar' and 'line' charts.",
                     items: { type: Type.STRING }
                 },
                 datasets: {
@@ -293,25 +290,18 @@ export const CHART_JS_SCHEMA = {
                             label: { type: Type.STRING },
                             data: {
                                 type: Type.ARRAY,
-                                description: "The array of numerical data points for the chart.",
-                                items: { type: Type.NUMBER }
+                                description: "The array of data points. For 'bar'/'line', an array of numbers. For 'scatter', an array of objects like {x: number, y: number}."
                             },
                         },
                         required: ["label", "data"]
                     }
                 }
             },
-            required: ["labels", "datasets"]
+            required: ["datasets"]
         },
         options: {
             type: Type.OBJECT,
             description: "Optional Chart.js options object.",
-            properties: {
-                responsive: {
-                    type: Type.BOOLEAN,
-                    description: "A boolean to indicate if the chart should be responsive."
-                }
-            }
         }
     },
     required: ["type", "data"]
@@ -332,13 +322,13 @@ export const DATA_ANALYZER_SCHEMA = {
         },
         chartSuggestions: {
             type: Type.ARRAY,
-            description: "An array of chart configurations for visualizing the data. Each object must be a valid Chart.js configuration. Suggested chart types should be limited to 'bar' or 'line'.",
+            description: "An array of chart configurations for visualizing the data. Each object must be a valid Chart.js configuration.",
             items: {
                 type: Type.OBJECT,
                 properties: {
                     type: {
                         type: Type.STRING,
-                        description: "The type of chart (must be 'bar' or 'line')."
+                        description: "The type of chart (e.g., 'bar', 'line', 'scatter')."
                     },
                     data: {
                         type: Type.OBJECT,
@@ -356,8 +346,7 @@ export const DATA_ANALYZER_SCHEMA = {
                                         label: { type: Type.STRING },
                                         data: {
                                             type: Type.ARRAY,
-                                            description: "An array of numerical data points for the chart. Must contain numbers.",
-                                            items: { type: Type.NUMBER }
+                                            description: "An array of data points. For 'bar'/'line', an array of numbers. For 'scatter', an array of objects like {x: number, y: number}."
                                         },
                                         backgroundColor: {
                                             type: Type.ARRAY,
@@ -375,33 +364,7 @@ export const DATA_ANALYZER_SCHEMA = {
                     },
                     options: {
                         type: Type.OBJECT,
-                        description: "The options object for Chart.js, including scales, plugins, etc.",
-                        properties: {
-                           scales: {
-                               type: Type.OBJECT,
-                               description: "Configuration for the chart's axes. Can be empty for charts like 'pie'.",
-                               properties: {
-                                   y: {
-                                       type: Type.OBJECT,
-                                       properties: {
-                                           beginAtZero: { type: Type.BOOLEAN }
-                                       }
-                                   },
-                                   x: {
-                                        type: Type.OBJECT,
-                                        properties: {
-                                            title: {
-                                                type: Type.OBJECT,
-                                                properties: {
-                                                    display: {type: Type.BOOLEAN},
-                                                    text: {type: Type.STRING}
-                                                }
-                                            }
-                                        }
-                                   }
-                               }
-                           }
-                        }
+                        description: "The options object for Chart.js, including scales, plugins, etc."
                     }
                 }
             }

@@ -1,13 +1,10 @@
 
 
-
-
 import React, { useState, useCallback, useEffect } from 'react';
-import { Chart } from 'chart.js';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
-import { getStepContext, parseGeminiError, callGeminiWithRetry } from '../../services';
-import { QA_AGENT_SCHEMA, CHART_JS_SCHEMA, ANALYSIS_DECISION_SCHEMA } from '../../config';
+import { parseGeminiError, callGeminiWithRetry } from '../../services';
+import { ANALYSIS_PLAN_SCHEMA, CHART_JS_SCHEMA } from '../../config';
 import { GeneratedOutput } from '../common/GeneratedOutput';
 import { AgenticAnalysisView } from '../common/AgenticAnalysisView';
 
@@ -18,19 +15,19 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     const [agenticRun, setAgenticRun] = useState({
         status: 'idle', // 'idle', 'running', 'success', 'failed'
         iterations: 0,
-        maxIterations: 25,
+        maxIterations: 1, // Will be updated by plan
         logs: [],
     });
 
     const stepData = activeExperiment.stepData[7] || {};
 
     const performAgenticAnalysis = useCallback(async () => {
-        if (!gemini) {
-            addToast("Gemini not available", "danger");
+        if (!gemini || !stepData.input) {
+            addToast("Gemini not available or no data to analyze.", "danger");
             return;
         }
 
-        setAgenticRun(prev => ({ ...prev, status: 'running', logs: [], iterations: 0 }));
+        setAgenticRun({ status: 'running', logs: [], iterations: 0, maxIterations: 1 });
         const logCallback = (agent: string, message: string) => setAgenticRun(prev => ({...prev, logs: [...prev.logs, { agent, message }]}));
         
         const callAgentWithLog = async (agentName: string, model: string, params: any) => {
@@ -42,96 +39,163 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
             await new Promise(resolve => setTimeout(resolve, 2000)); // Proactive delay
             return result;
         };
+        
+        const isChartJsonValid = (jsonString, chartType) => {
+            try {
+                const chart = JSON.parse(jsonString);
+                if (chart.type !== chartType) return false;
+                if (!chart.data || !Array.isArray(chart.data.datasets) || chart.data.datasets.length === 0) return false;
+                const dataset = chart.data.datasets[0];
+                if (!dataset.data || !Array.isArray(dataset.data) || dataset.data.length === 0) return false;
+                if (chartType === 'scatter') {
+                    const firstPoint = dataset.data[0];
+                    if (typeof firstPoint !== 'object' || firstPoint.x === undefined || firstPoint.y === undefined) return false;
+                } else { // bar or line
+                    if (!Array.isArray(chart.data.labels) || chart.data.labels.length === 0) return false;
+                }
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
 
         try {
-            // Step 1: Analyst Agent makes a decision
-            const decisionPrompt = `You are an expert Analyst agent in the field of ${activeExperiment.field}. Your task is to analyze the following CSV data and decide the single best way to visualize the primary finding. Your choice must be either 'chart' or 'table'. You must also provide a concise 'goal' for the visualization. Your response must be a single, valid JSON object.\n\nData:\n\`\`\`csv\n${stepData.input}\n\`\`\``;
-            const decisionResponse = await callAgentWithLog('Analyst', 'gemini-flash-lite-latest', {
-                contents: decisionPrompt,
-                config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_DECISION_SCHEMA }
+            // PHASE 1: PLANNING
+            logCallback('System', '--- Phase 1: Analysis Planning ---');
+            const dataLines = stepData.input.split('\n');
+            const headers = dataLines[0];
+            const sampleData = dataLines.slice(0, 6).join('\n'); // Header + 5 rows
+
+            const managerPrompt = `You are a senior data scientist AI agent. Your task is to analyze the headers and a sample of a provided CSV dataset to create a robust analysis plan.
+
+**Dataset Analysis:**
+1.  **Identify Data Types:** Examine the column headers and sample data to distinguish between categorical columns (e.g., names, groups, categories) and numerical columns (e.g., measurements, counts, scores).
+2.  **Propose Visualizations:** Based on your analysis, devise a plan for 2 to 3 distinct and meaningful visualizations that will reveal key insights from the data.
+3.  **Prioritize Comparisons and Relationships:** Your plan should prioritize:
+    *   **Bar charts** for comparing a numerical value across different categories.
+    *   **Scatter plots** for exploring the relationship between two numerical values.
+    *   **Line charts** for showing a numerical value over a continuous variable (like time, if applicable).
+
+**Your Output:**
+You must generate a single, valid JSON object that conforms to the required schema. This JSON object will contain a "plan" which is an array of visualization plans.
+
+For each visualization in the plan, you must provide:
+-   \`chartType\`: A string, must be one of 'bar', 'line', or 'scatter'.
+-   \`goal\`: A highly specific, one-sentence instruction for a "Doer" agent. This instruction must be clear enough for another AI to execute. It should specify the exact aggregation to perform (e.g., "average", "total") and any filtering required (e.g., "for the 'Aged' model only").
+-   \`columns\`: An array of the exact column names from the CSV required to create the chart.
+
+**Dataset Headers:** ${headers}
+**Dataset Field:** ${activeExperiment.field}
+**Dataset Sample (first 5 rows):**
+\`\`\`csv
+${sampleData}
+\`\`\``;
+            const planResponse = await callAgentWithLog('Manager', 'gemini-2.5-flash', {
+                contents: managerPrompt,
+                config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
             });
-            const decision = JSON.parse(decisionResponse);
-            logCallback('Analyst', `Decision: ${decision.analysis_type}. Goal: "${decision.goal}"`);
+            const analysisPlan = JSON.parse(planResponse).plan;
+            if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan.");
+            
+            setAgenticRun(prev => ({ ...prev, maxIterations: analysisPlan.length }));
+            logCallback('Manager', `Analysis plan created with ${analysisPlan.length} visualizations.`);
 
-            let visualizationOutput = '';
-            let chartSuggestions = [];
+            // PHASE 2: EXECUTION
+            logCallback('System', '--- Phase 2: Chart Generation ---');
+            let successfulCharts = [];
+            for (const chartPlan of analysisPlan) {
+                setAgenticRun(prev => ({...prev, iterations: prev.iterations + 1 }));
+                logCallback('System', `Attempting to generate: ${chartPlan.goal}`);
+                let chartJson = '';
+                let success = false;
+                for(let attempt = 0; attempt < 3; attempt++) {
+                    if (attempt > 0) logCallback('Doer', `Retrying generation (attempt ${attempt + 1})...`);
+                    const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data. Your sole purpose is to execute a given instruction and generate a single, valid JSON object.
 
-            // Step 2: Branch based on decision
-            if (decision.analysis_type === 'chart') {
-                logCallback('System', 'Chart generation workflow initiated.');
-                let lastQAFeedback = "No feedback yet. This is the first attempt.";
+**CRITICAL INSTRUCTIONS:**
+1.  **Parse Data Carefully:** The provided CSV data is your source of truth. The first row is always the header.
+2.  **Execute the Goal:** You must precisely follow the \`goal\` provided. This may require you to perform calculations like filtering, grouping, and averaging the data from the specified \`columns\`.
+3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A", "", null), you MUST ignore that entire row for your calculation. Do not treat it as zero.
+4.  **Output Format:** Your final output must be ONLY the raw JSON object that conforms to the schema. Do not include any text, explanations, or markdown fences (\`\`\`json\`\`\`).
+5.  **Chart-Specific Data Structures:**
+    *   For **'bar'** and **'line'** charts, the \`data.datasets[0].data\` property must be an array of numbers. The \`data.labels\` property must be an array of corresponding strings.
+    *   For **'scatter'** charts, the \`data.datasets[0].data\` property must be an array of objects, where each object is \`{x: number, y: number}\`. You do not need to provide \`data.labels\` for scatter plots.
 
-                for (let i = 0; i < agenticRun.maxIterations; i++) {
-                    setAgenticRun(prev => ({...prev, iterations: i + 1, logs: [...prev.logs, {agent: 'System', message: `--- Charting Iteration ${i+1} ---`}]}));
-                    
-                    const managerInstruction = await callAgentWithLog('Manager', 'gemini-flash-lite-latest', { contents: `You are the Manager Agent. The goal is: "${decision.goal}". Last QA feedback: "${lastQAFeedback}". Provide a new, concise instruction for the Doer agent to create a Chart.js JSON configuration.` });
-                    logCallback('Manager', managerInstruction);
-                    
-                    const doerJson = await callAgentWithLog('Doer', 'gemini-flash-lite-latest', {
-                        contents: `You are the Doer. You ONLY generate Chart.js JSON for 'bar' or 'line' charts. Your instruction is: "${managerInstruction}". The data is: \`\`\`csv\n${stepData.input}\n\`\`\`. Output ONLY the raw JSON.`,
+**Your Task:**
+*   **Goal:** "${chartPlan.goal}"
+*   **Chart Type:** "${chartPlan.chartType}"
+*   **Required Columns:** ${JSON.stringify(chartPlan.columns)}
+*   **Full CSV Data:**
+    \`\`\`csv
+    ${stepData.input}
+    \`\`\``;
+                    const doerResponse = await callAgentWithLog('Doer', 'gemini-2.5-flash', {
+                        contents: doerPrompt,
                         config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
                     });
-                    logCallback('Doer', 'Generated new chart configuration.');
-                    
-                    try {
-                        JSON.parse(doerJson); // Quick local validation
-                        const qaResponse = await callAgentWithLog('QA', 'gemini-flash-lite-latest', {
-                            contents: `You are the QA Agent. Goal: "${decision.goal}". Doer's JSON: \`\`\`json\n${doerJson}\n\`\`\`. Does this perfectly fulfill the goal? Your response must be a valid JSON object with "pass" (boolean) and "feedback" (string).`,
-                            config: { responseMimeType: 'application/json', responseSchema: QA_AGENT_SCHEMA }
-                        });
-                        const qaResult = JSON.parse(qaResponse);
-                        lastQAFeedback = qaResult.feedback;
-                        logCallback('QA', lastQAFeedback);
-                        
-                        if (qaResult.pass) {
-                            visualizationOutput = doerJson;
-                            chartSuggestions = [JSON.parse(doerJson)];
-                            logCallback('System', 'Chart generation successful.');
-                            break; // Exit loop on success
-                        }
-                    } catch (e) {
-                        lastQAFeedback = `The generated output was not valid JSON. Error: ${e.message}. Please try again.`;
-                        logCallback('QA', lastQAFeedback);
+                    if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
+                        chartJson = doerResponse;
+                        success = true;
+                        break;
                     }
                 }
-                if (chartSuggestions.length === 0) throw new Error("Chart generation loop failed after multiple attempts.");
-
-            } else { // Handle 'table'
-                logCallback('System', 'Table generation workflow initiated.');
-                const tablePrompt = `You are a Data Analyst. Your goal is to create a summary table based on this instruction: "${decision.goal}". Use the following CSV data to create a concise but informative table in Markdown format. Output ONLY the Markdown table.\n\nData:\n\`\`\`csv\n${stepData.input}\n\`\`\``;
-                visualizationOutput = await callAgentWithLog('Table Generator', 'gemini-flash-lite-latest', { contents: tablePrompt });
-                logCallback('Table Generator', 'Generated Markdown table.');
+                if (success) {
+                    successfulCharts.push(JSON.parse(chartJson));
+                    logCallback('System', `Successfully generated chart for: ${chartPlan.goal}`);
+                } else {
+                    logCallback('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
+                }
             }
-            
-            // Step 3: Final Summarizer Agent
-            const summarizerPrompt = `You are an expert Data Analyst in the field of ${activeExperiment.field}. Based on the original CSV data and the following generated visualization, write a detailed, comprehensive summary and interpretation of the findings in Markdown format.\n\nVisualization:\n${visualizationOutput}\n\nOriginal Data:\n\`\`\`csv\n${stepData.input}\n\`\`\``;
-            let finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
+            if (successfulCharts.length === 0) throw new Error("The Doer agent failed to generate any valid charts.");
 
-            // If a table was made, prepend it to the summary.
-            if (decision.analysis_type === 'table') {
-                finalSummary = `### Summary Table\n\n${visualizationOutput}\n\n### Analysis\n\n${finalSummary}`;
-            }
+            // PHASE 3: SYNTHESIS
+            logCallback('System', '--- Phase 3: Final Summary ---');
+            const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${activeExperiment.field}.
 
-            // Step 4: Assemble and Save
-            const finalOutput = JSON.stringify({ summary: finalSummary, chartSuggestions: chartSuggestions });
-            // Save the concise goal from the Analyst agent to be used as the log summary.
-            const finalStepData = { ...stepData, output: finalOutput, suggestedInput: decision.goal };
+You have been provided with the original analysis plan, the successfully generated charts (as Chart.js JSON), and the raw data.
+
+**Your Summary Must:**
+1.  Start with a brief overview of the dataset's structure.
+2.  Systematically discuss the findings from each visualization. Refer to them as Figure 1, Figure 2, etc., in the order they were provided.
+3.  For each figure, explain what was plotted and what the key insight or trend is.
+4.  Conclude with an overall interpretation of what the results mean in the context of the research field.
+5.  If any charts from the original plan failed to generate, you must mention that the analysis for that aspect could not be completed.
+
+**Original Analysis Plan:**
+${JSON.stringify(analysisPlan, null, 2)}
+
+**Successfully Generated Charts (as JSON):**
+${JSON.stringify(successfulCharts, null, 2)}
+
+**Raw CSV Data:**
+\`\`\`csv
+${stepData.input}
+\`\`\`
+
+Your output must be in Markdown format.`;
+            const finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
+
+            // Final Assembly
+            const finalOutput = JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts });
+            // For the log summary, we'll create a concise summary of the plan.
+            const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
+            const finalStepData = { ...stepData, output: finalOutput, suggestedInput: logSummary };
             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
             setAgenticRun(prev => ({ ...prev, status: 'success' }));
             addToast("Agentic analysis complete!", "success");
 
         } catch (error) {
             addToast(parseGeminiError(error, `Agentic workflow failed.`), 'danger');
-            setAgenticRun(prev => ({ ...prev, status: 'failed' }));
+            setAgenticRun(prev => ({ ...prev, status: 'failed', logs: [...prev.logs, { agent: 'System', message: `ERROR: ${error.message}`}]}));
         }
 
-    }, [activeExperiment, gemini, addToast, updateExperiment, stepData, agenticRun.maxIterations]);
+    }, [activeExperiment, gemini, addToast, updateExperiment, stepData]);
     
     useEffect(() => {
-        if (!stepData.output) {
+        if (!stepData.output && agenticRun.status === 'idle') {
             performAgenticAnalysis();
         }
-    }, []);
+    }, [stepData.output, agenticRun.status, performAgenticAnalysis]);
 
     if (agenticRun.status === 'running') {
         return <AgenticAnalysisView agenticRun={agenticRun} />;

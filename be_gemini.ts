@@ -1,11 +1,4 @@
 
-
-
-
-
-
-
-
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -13,12 +6,9 @@ import {
     STEP_SPECIFIC_TUNING_PARAMETERS,
     DATA_ANALYZER_SCHEMA,
     LITERATURE_REVIEW_SCHEMA,
-    // FIX: Removed STATISTICAL_METHODS_SCHEMA as it is not defined in config.ts and was used in deprecated code.
     RESEARCH_QUESTION_SCHEMA,
     WORKFLOW_STEPS,
-    QA_AGENT_SCHEMA,
     CHART_JS_SCHEMA,
-    ANALYSIS_DECISION_SCHEMA
 } from './config';
 
 
@@ -320,7 +310,6 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
             config.responseSchema = DATA_ANALYZER_SCHEMA;
             const jsonInstructions = "Your final output must be ONLY a single, raw JSON object that conforms to the required schema. Do not include any text, explanations, or markdown fences. The 'chartSuggestions' array should only contain configurations for 'bar' or 'line' charts. If a table is more appropriate, describe it in the summary using Markdown. Ensure that within each chart configuration, 'data.datasets' is an array of objects and each 'dataset.data' is an array of numbers.";
 
-            // FIX: Removed deprecated `else if (settings.analysisStage === 'suggest_methods')` block which caused an error.
             if (settings.isAutomated) { // This is now used for the initial goal-setting call
                 basePrompt += `Analyze the following CSV data from a study in ${context.experimentField}: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
             } else { // Fallback/default for the main agentic process trigger

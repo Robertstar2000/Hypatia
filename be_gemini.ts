@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -37,6 +38,7 @@ const callGeminiWithTimeout = async (geminiCall: Promise<any>, timeout: number =
  * @param params - The parameters for the generateContent call.
  * @param onLog - An optional callback to log retry attempts.
  * @param maxRetries - The maximum number of retry attempts.
+ * @param timeout - The timeout for the API call in milliseconds.
  * @returns The response from the Gemini API.
  */
 export const callGeminiWithRetry = async (

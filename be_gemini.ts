@@ -1,6 +1,7 @@
 
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -628,6 +629,8 @@ const isChartJsonValid = (jsonString: string, chartType: string): boolean => {
 /**
  * Executes a robust, multi-agent workflow for data analysis.
  * This function is designed to be used by both manual and automated modes.
+ * It is self-healing: if any agent fails, it will catch the error and
+ * generate a fallback summary, ensuring it always resolves successfully.
  */
 export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
     
@@ -641,13 +644,14 @@ export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, update
         return result;
     };
 
-    // --- PHASE 1: PRE-ANALYSIS ---
-    updateLog('System', '--- Phase 1: Preliminary Analysis ---');
-    const dataLines = csvData.split('\n');
-    const headers = dataLines[0];
-    const sampleData = dataLines.slice(0, 6).join('\n'); // Header + 5 rows
+    try {
+        // --- PHASE 1: PRE-ANALYSIS ---
+        updateLog('System', '--- Phase 1: Preliminary Analysis ---');
+        const dataLines = csvData.split('\n');
+        const headers = dataLines[0];
+        const sampleData = dataLines.slice(0, 6).join('\n'); // Header + 5 rows
 
-    const systemPrompt = `You are a data science assistant. Your task is to perform a preliminary analysis of a CSV dataset based on its headers and a data sample.
+        const systemPrompt = `You are a data science assistant. Your task is to perform a preliminary analysis of a CSV dataset based on its headers and a data sample.
 1.  List the column names.
 2.  For each column, identify it as either 'Categorical' (contains non-numeric text, groups, or identifiers) or 'Numerical' (contains numbers that can be measured or counted).
 3.  Based on this, suggest 2-3 interesting relationships or comparisons that could be visualized to find insights. Be specific. For example: "Compare the average 'Score' across different 'Treatment' groups", or "Explore the relationship between 'Temperature' and 'Yield'".
@@ -658,12 +662,12 @@ Your output must be a brief but clear text summary. This summary will be given t
 \`\`\`csv
 ${sampleData}
 \`\`\``;
-    const preliminaryAnalysis = await callAgentWithLog('System', 'gemini-flash-lite-latest', { contents: systemPrompt });
-    updateLog('System', `Preliminary analysis complete. Identified key relationships.`);
+        const preliminaryAnalysis = await callAgentWithLog('System', 'gemini-flash-lite-latest', { contents: systemPrompt });
+        updateLog('System', `Preliminary analysis complete. Identified key relationships.`);
 
-    // --- PHASE 2: PLANNING ---
-    updateLog('System', '--- Phase 2: Analysis Planning ---');
-    const managerPrompt = `You are a senior data scientist AI agent. Your task is to convert a preliminary textual analysis into a structured JSON analysis plan.
+        // --- PHASE 2: PLANNING ---
+        updateLog('System', '--- Phase 2: Analysis Planning ---');
+        const managerPrompt = `You are a senior data scientist AI agent. Your task is to convert a preliminary textual analysis into a structured JSON analysis plan.
 
 **CRITICAL INSTRUCTIONS:**
 -   You must generate a single, valid JSON object that conforms to the required schema.
@@ -675,31 +679,31 @@ ${sampleData}
 
 **Dataset Headers:** ${headers}
 **Dataset Field:** ${experiment.field}`;
-    const planResponse = await callAgentWithLog('Manager', 'gemini-2.5-flash', {
-        contents: managerPrompt,
-        config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
-    });
-    const analysisPlan = JSON.parse(planResponse).plan;
-    if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan.");
-    updateLog('Manager', `Analysis plan created with ${analysisPlan.length} visualizations.`);
+        const planResponse = await callAgentWithLog('Manager', 'gemini-2.5-flash', {
+            contents: managerPrompt,
+            config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
+        });
+        const analysisPlan = JSON.parse(planResponse).plan;
+        if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan.");
+        updateLog('Manager', `Analysis plan created with ${analysisPlan.length} visualizations.`);
 
-    // --- PHASE 3: EXECUTION ---
-    updateLog('System', '--- Phase 3: Chart Generation ---');
-    let successfulCharts = [];
-    for (const chartPlan of analysisPlan) {
-        updateLog('System', `Attempting to generate: ${chartPlan.goal}`);
-        let chartJson = '';
-        let success = false;
-        for (let attempt = 0; attempt < 3; attempt++) {
-            if (attempt > 0) updateLog('Doer', `Retrying generation (attempt ${attempt + 1})...`);
-            const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data. Your sole purpose is to execute a given instruction and generate a single, valid JSON object.
+        // --- PHASE 3: EXECUTION ---
+        updateLog('System', '--- Phase 3: Chart Generation ---');
+        let successfulCharts = [];
+        for (const chartPlan of analysisPlan) {
+            updateLog('System', `Attempting to generate: ${chartPlan.goal}`);
+            let chartJson = '';
+            let success = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                if (attempt > 0) updateLog('Doer', `Retrying generation (attempt ${attempt + 1})...`);
+                const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data. Your sole purpose is to execute a given instruction and generate a single, valid JSON object.
 **CRITICAL INSTRUCTIONS:**
 1.  **Parse Data Carefully:** The provided CSV data is your source of truth. The first row is always the header.
 2.  **Execute the Goal:** You must precisely follow the \`goal\` provided. This may require you to perform calculations like filtering, grouping, and averaging the data from the specified \`columns\`.
-3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A", "", null), you MUST ignore that entire row for your calculation. Do not treat it as zero.
+3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A", "", null, or any text), you MUST ignore that entire row for your calculation. Do not treat it as zero. This is the most common reason for failure.
 4.  **Output Format:** Your final output must be ONLY the raw JSON object that conforms to the schema. Do not include any text, explanations, or markdown fences (\`\`\`json\`\`\`).
 5.  **Chart-Specific Data Structures:**
-    *   For **'bar'** and **'line'** charts, the \`data.datasets[0].data\` property must be an array of numbers. The \`data.labels\` property must be an array of corresponding strings.
+    *   For **'bar'** and **'line'** charts, the \`data.datasets[0].data\` property must be an array of numbers. The \`data.labels\` property must be an array of corresponding strings. The lengths of these two arrays MUST be equal.
     *   For **'scatter'** charts, the \`data.datasets[0].data\` property must be an array of objects, where each object is \`{x: number, y: number}\`. You do not need to provide \`data.labels\` for scatter plots.
 **Your Task:**
 *   **Goal:** "${chartPlan.goal}"
@@ -709,31 +713,31 @@ ${sampleData}
     \`\`\`csv
     ${csvData}
     \`\`\``;
-            const doerResponse = await callAgentWithLog('Doer', 'gemini-2.5-flash', {
-                contents: doerPrompt,
-                config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
-            });
-            if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
-                chartJson = doerResponse;
-                success = true;
-                break;
+                const doerResponse = await callAgentWithLog('Doer', 'gemini-2.5-flash', {
+                    contents: doerPrompt,
+                    config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
+                });
+                if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
+                    chartJson = doerResponse;
+                    success = true;
+                    break;
+                }
+            }
+            if (success) {
+                successfulCharts.push(JSON.parse(chartJson));
+                updateLog('System', `Successfully generated chart for: ${chartPlan.goal}`);
+            } else {
+                updateLog('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
             }
         }
-        if (success) {
-            successfulCharts.push(JSON.parse(chartJson));
-            updateLog('System', `Successfully generated chart for: ${chartPlan.goal}`);
-        } else {
-            updateLog('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
+
+        if (successfulCharts.length === 0) {
+            updateLog('System', 'Warning: The Doer agent failed to generate any valid charts. The summarizer will analyze the raw data directly.');
         }
-    }
 
-    if (successfulCharts.length === 0) {
-        updateLog('System', 'Warning: The Doer agent failed to generate any valid charts. The summarizer will analyze the raw data directly.');
-    }
-
-    // --- PHASE 4: SYNTHESIS ---
-    updateLog('System', '--- Phase 4: Final Summary ---');
-    const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${experiment.field}.
+        // --- PHASE 4: SYNTHESIS ---
+        updateLog('System', '--- Phase 4: Final Summary ---');
+        const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${experiment.field}.
 You have been provided with the original analysis plan, any successfully generated charts (as Chart.js JSON), and the raw data.
 **Your Summary Must:**
 1.  Start with a brief overview of the dataset's structure.
@@ -750,12 +754,44 @@ ${JSON.stringify(successfulCharts, null, 2)}
 ${csvData}
 \`\`\`
 Your output must be in Markdown format.`;
-    const finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
+        const finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
 
-    // --- FINAL ASSEMBLY ---
-    const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
-    return {
-        finalOutput: JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts }),
-        logSummary,
-    };
+        // --- FINAL ASSEMBLY ---
+        const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
+        return {
+            finalOutput: JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts }),
+            logSummary,
+        };
+    } catch (error) {
+        const errorMessage = (error instanceof Error) ? error.message : String(error);
+        updateLog('System', `FATAL WORKFLOW ERROR: ${errorMessage}. Attempting to generate a fallback summary.`);
+
+        try {
+            const fallbackPrompt = `A critical error occurred during an automated multi-agent attempt to analyze and visualize the following data. Your task is to provide a basic textual summary of the data instead.
+**Instructions:**
+1.  Start your summary by stating: "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:"
+2.  Analyze the provided CSV data and describe any obvious trends, patterns, or key statistics you can find.
+3.  Keep the summary concise and in Markdown format.
+
+**Data:**
+\`\`\`csv
+${csvData}
+\`\`\``;
+            const fallbackSummary = await callAgentWithLog('System', 'gemini-2.5-flash', { contents: fallbackPrompt });
+            
+            updateLog('System', 'Fallback summary generated successfully.');
+            
+            return {
+                finalOutput: JSON.stringify({ summary: fallbackSummary, chartSuggestions: [] }),
+                logSummary: 'Workflow failed, but a fallback summary was generated.'
+            };
+        } catch (fallbackError) {
+             const finalErrorMessage = `A critical error occurred during the analysis, and a fallback summary could not be generated. Original Error: ${errorMessage}. Fallback Error: ${(fallbackError as Error).message}`;
+             updateLog('System', `CRITICAL: Fallback summary generation also failed.`);
+             return {
+                finalOutput: JSON.stringify({ summary: finalErrorMessage, chartSuggestions: [] }),
+                logSummary: 'Workflow and fallback summary generation both failed.'
+             };
+        }
+    }
 };

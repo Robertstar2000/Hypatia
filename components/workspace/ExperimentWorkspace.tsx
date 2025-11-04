@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
-import { parseGeminiError, getStepContext, getPromptForStep, runPublicationAgent, runLiteratureReviewAgent, callGeminiWithRetry, callGeminiStreamWithRetry } from '../../services';
-import { WORKFLOW_STEPS, ANALYSIS_PLAN_SCHEMA, CHART_JS_SCHEMA } from '../../config';
+import { parseGeminiError, getStepContext, getPromptForStep, runPublicationAgent, runLiteratureReviewAgent, callGeminiWithRetry, callGeminiStreamWithRetry, runDataAnalysisAgent } from '../../services';
+import { WORKFLOW_STEPS } from '../../config';
 
 import { ExperimentRunner } from '../steps/runner/ExperimentRunner';
 import { DataAnalysisWorkspace } from '../steps/DataAnalysisWorkspace';
@@ -13,26 +13,6 @@ import { ProjectCompletionView } from './ProjectCompletionView';
 import { AutomationModeSelector } from './AutomationModeSelector';
 import { FineTuneModal } from './FineTuneModal';
 import { LiteratureReviewWorkspace } from '../steps/LiteratureReviewWorkspace';
-
-const isChartJsonValid = (jsonString, chartType) => {
-    try {
-        const chart = JSON.parse(jsonString);
-        if (chart.type !== chartType) return false;
-        if (!chart.data || !Array.isArray(chart.data.datasets) || chart.data.datasets.length === 0) return false;
-        const dataset = chart.data.datasets[0];
-        if (!dataset.data || !Array.isArray(dataset.data) || dataset.data.length === 0) return false;
-        if (chartType === 'scatter') {
-            const firstPoint = dataset.data[0];
-            if (typeof firstPoint !== 'object' || firstPoint.x === undefined || firstPoint.y === undefined) return false;
-        } else { // bar or line
-            if (!Array.isArray(chart.data.labels) || chart.data.labels.length === 0) return false;
-        }
-        return true;
-    } catch (e) {
-        return false;
-    }
-};
-
 
 export const ExperimentWorkspace = () => {
     const { activeExperiment, updateExperiment, gemini, setActiveExperiment } = useExperiment();
@@ -76,14 +56,13 @@ export const ExperimentWorkspace = () => {
             try {
                 let resultText;
                 let currentStepData = { ...(currentExp.stepData[i] || {}) };
+                const dummyLog = (agent: string, msg: string) => console.log(`[AutoRun Step ${i}] ${agent}: ${msg}`);
 
                 if (i === 10) {
-                     const dummyLog = (agent: string, msg: string) => console.log(`[AutoRun Step 10] ${agent}: ${msg}`);
                      resultText = await runPublicationAgent({ experiment: currentExp, gemini, updateLog: dummyLog });
                      currentStepData = { ...currentStepData, output: resultText };
                 
-                } else if (i === 2) { // Use the agent for literature review
-                    const dummyLog = (agent: string, msg: string) => console.log(`[AutoRun Step 2] ${agent}: ${msg}`);
+                } else if (i === 2) {
                     resultText = await runLiteratureReviewAgent({ experiment: currentExp, gemini, updateLog: dummyLog });
                     currentStepData = { ...currentStepData, output: resultText };
 
@@ -101,98 +80,16 @@ export const ExperimentWorkspace = () => {
                     const csvData = currentExp.stepData[i]?.input;
                     if (!csvData) throw new Error("No CSV data found for Step 7 analysis during automation.");
 
-                    const callAgentForAutomation = async (model: string, params: any) => {
-                        const response = await callGeminiWithRetry(gemini, model, params);
-                        await new Promise(resolve => setTimeout(resolve, 4000));
-                        return response.text.trim();
-                    };
-
-                    // Phase 1: Planning
-                    const dataLines = csvData.split('\n');
-                    const headers = dataLines[0];
-                    const sampleData = dataLines.slice(0, 6).join('\n');
-                    const managerPrompt = `You are a senior data scientist AI agent. Your task is to analyze the headers and a sample of a provided CSV dataset to create a robust analysis plan.
-**Dataset Analysis:**
-1.  **Identify Data Types:** Examine the column headers and sample data to distinguish between categorical columns and numerical columns.
-2.  **Propose Visualizations:** Based on your analysis, devise a plan for 2 to 3 distinct and meaningful visualizations.
-3.  **Prioritize Comparisons and Relationships:** Your plan should prioritize:
-    *   **Bar charts** for comparing a numerical value across different categories.
-    *   **Scatter plots** for exploring the relationship between two numerical values.
-    *   **Line charts** for showing a numerical value over a continuous variable (like time, if applicable).
-**Your Output:**
-You must generate a single, valid JSON object that conforms to the required schema. This JSON object will contain a "plan" which is an array of visualization plans.
-For each visualization in the plan, you must provide:
--   \`chartType\`: A string, must be one of 'bar', 'line', or 'scatter'.
--   \`goal\`: A highly specific, one-sentence instruction for a "Doer" agent.
--   \`columns\`: An array of the exact column names from the CSV required to create the chart.
-**Dataset Headers:** ${headers}
-**Dataset Field:** ${currentExp.field}
-**Dataset Sample (first 5 rows):**
-\`\`\`csv
-${sampleData}
-\`\`\``;
-                    const planResponse = await callAgentForAutomation('gemini-2.5-flash', {
-                        contents: managerPrompt,
-                        config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
+                    const { finalOutput, logSummary } = await runDataAnalysisAgent({
+                        experiment: currentExp,
+                        csvData,
+                        gemini,
+                        updateLog: dummyLog
                     });
-                    const analysisPlan = JSON.parse(planResponse).plan;
-                    if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan during automation.");
                     
-                    // Phase 2: Execution
-                    let successfulCharts = [];
-                    for (const chartPlan of analysisPlan) {
-                        let chartJson = '';
-                        let success = false;
-                        for(let attempt = 0; attempt < 3; attempt++) {
-                            const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data.
-**CRITICAL INSTRUCTIONS:**
-1.  **Parse Data Carefully:** The provided CSV data is your source of truth.
-2.  **Execute the Goal:** You must precisely follow the \`goal\`. This may require calculations like filtering, grouping, and averaging.
-3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A"), you MUST ignore that entire row for your calculation.
-4.  **Output Format:** Your final output must be ONLY the raw JSON object that conforms to the schema.
-5.  **Chart-Specific Data Structures:** For 'bar'/'line', \`data.datasets[0].data\` must be an array of numbers and \`data.labels\` must be an array of strings. For 'scatter', \`data.datasets[0].data\` must be an array of objects like \`{x: number, y: number}\`.
-**Your Task:**
-*   **Goal:** "${chartPlan.goal}"
-*   **Chart Type:** "${chartPlan.chartType}"
-*   **Required Columns:** ${JSON.stringify(chartPlan.columns)}
-*   **Full CSV Data:**
-    \`\`\`csv
-    ${csvData}
-    \`\`\``;
-                            const doerResponse = await callAgentForAutomation('gemini-2.5-flash', {
-                                contents: doerPrompt,
-                                config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
-                            });
-                            if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
-                                chartJson = doerResponse;
-                                success = true;
-                                break;
-                            }
-                        }
-                        if (success) successfulCharts.push(JSON.parse(chartJson));
-                    }
-                    
-                    // Phase 3: Synthesis
-                    const summarizerPrompt = `You are a scientific communication AI agent. Write a detailed summary and interpretation of a data analysis for a research project in ${currentExp.field}.
-**Your Summary Must:**
-1.  If visualizations are provided, systematically discuss the findings from each one. Refer to them as Figure 1, Figure 2, etc.
-2.  If NO visualizations are provided, you MUST perform a detailed textual analysis of the raw data directly.
-3.  Conclude with an overall interpretation of what the results mean.
-**Original Analysis Plan:**
-${JSON.stringify(analysisPlan, null, 2)}
-**Successfully Generated Charts (as JSON):**
-${JSON.stringify(successfulCharts, null, 2)}
-**Raw CSV Data:**
-\`\`\`csv
-${csvData}
-\`\`\`
-Your output must be in Markdown format.`;
-                    const finalSummary = await callAgentForAutomation('gemini-2.5-flash', { contents: summarizerPrompt });
-
-                    // Final Assembly
-                    resultText = JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts });
-                    const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
+                    resultText = finalOutput;
                     currentStepData = { ...currentStepData, output: resultText, suggestedInput: logSummary };
+
                 } else {
                     const context = getStepContext(currentExp, i);
                     const userInput = currentExp.stepData[i]?.input || 'Proceed with generation.';

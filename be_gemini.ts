@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -10,6 +11,7 @@ import {
     RESEARCH_QUESTION_SCHEMA,
     WORKFLOW_STEPS,
     CHART_JS_SCHEMA,
+    ANALYSIS_PLAN_SCHEMA,
 } from './config';
 
 
@@ -479,13 +481,16 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
 
     updateLog('Editor', 'Performing final editorial review...');
-    const polishPrompt = `You are a helpful scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
+    const polishPrompt = `You are an efficient scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
 Your goals are to:
 1.  Add a compelling title (as a Level 1 Markdown Header: # Title).
 2.  Improve the overall flow, clarity, and grammatical correctness.
 3.  Ensure a consistent and professional tone.
 
-**IMPORTANT**: Be efficient. Do not drastically change the scientific content or conclusions. Focus on polishing the existing text. The paper's target length is ${pageCount}.
+**CRITICAL INSTRUCTIONS**:
+-   **BE EFFICIENT**: This is a language and structure polish only. Do not perform a deep scientific critique or rewrite large sections. Your goal is to refine the existing text quickly.
+-   **DO NOT CHANGE MEANING**: Do not alter the scientific conclusions or the core meaning of the text.
+-   **TARGET LENGTH**: The paper's target length is ${pageCount}.
 
 Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
     const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor', 120000); // Increased 120-second timeout
@@ -596,4 +601,161 @@ Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", 
     }
 
     throw new Error(`Literature Review generation failed after ${maxIterations} attempts.`);
+};
+
+/**
+ * Internal helper to validate a Chart.js JSON string against basic structural requirements.
+ */
+const isChartJsonValid = (jsonString: string, chartType: string): boolean => {
+    try {
+        const chart = JSON.parse(jsonString);
+        if (chart.type !== chartType) return false;
+        if (!chart.data || !Array.isArray(chart.data.datasets) || chart.data.datasets.length === 0) return false;
+        const dataset = chart.data.datasets[0];
+        if (!dataset.data || !Array.isArray(dataset.data) || dataset.data.length === 0) return false;
+        if (chartType === 'scatter') {
+            const firstPoint = dataset.data[0];
+            if (typeof firstPoint !== 'object' || firstPoint.x === undefined || firstPoint.y === undefined) return false;
+        } else { // bar or line
+            if (!Array.isArray(chart.data.labels) || chart.data.labels.length === 0) return false;
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+/**
+ * Executes a robust, multi-agent workflow for data analysis.
+ * This function is designed to be used by both manual and automated modes.
+ */
+export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
+    
+    const callAgentWithLog = async (agentName: string, model: string, params: any) => {
+        updateLog(agentName, 'is thinking...');
+        const retryLog = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
+        const response = await callGeminiWithRetry(gemini, model, params, retryLog);
+        const result = response.text.trim();
+        updateLog(agentName, 'has completed its task.');
+        await new Promise(resolve => setTimeout(resolve, 4000)); // Proactive delay
+        return result;
+    };
+
+    // --- PHASE 1: PRE-ANALYSIS ---
+    updateLog('System', '--- Phase 1: Preliminary Analysis ---');
+    const dataLines = csvData.split('\n');
+    const headers = dataLines[0];
+    const sampleData = dataLines.slice(0, 6).join('\n'); // Header + 5 rows
+
+    const systemPrompt = `You are a data science assistant. Your task is to perform a preliminary analysis of a CSV dataset based on its headers and a data sample.
+1.  List the column names.
+2.  For each column, identify it as either 'Categorical' (contains non-numeric text, groups, or identifiers) or 'Numerical' (contains numbers that can be measured or counted).
+3.  Based on this, suggest 2-3 interesting relationships or comparisons that could be visualized to find insights. Be specific. For example: "Compare the average 'Score' across different 'Treatment' groups", or "Explore the relationship between 'Temperature' and 'Yield'".
+Your output must be a brief but clear text summary. This summary will be given to another AI to create a formal plan.
+**Dataset Headers:** ${headers}
+**Dataset Field:** ${experiment.field}
+**Dataset Sample (first 5 rows):**
+\`\`\`csv
+${sampleData}
+\`\`\``;
+    const preliminaryAnalysis = await callAgentWithLog('System', 'gemini-flash-lite-latest', { contents: systemPrompt });
+    updateLog('System', `Preliminary analysis complete. Identified key relationships.`);
+
+    // --- PHASE 2: PLANNING ---
+    updateLog('System', '--- Phase 2: Analysis Planning ---');
+    const managerPrompt = `You are a senior data scientist AI agent. Your task is to convert a preliminary textual analysis into a structured JSON analysis plan.
+
+**CRITICAL INSTRUCTIONS:**
+-   You must generate a single, valid JSON object that conforms to the required schema.
+-   The "plan" should contain 2-3 distinct visualizations based on the suggestions in the preliminary analysis.
+-   The \`goal\` for each visualization must be a highly specific, one-sentence instruction for a "Doer" agent. It must specify the exact aggregation (e.g., "average", "total") and any filtering required.
+
+**Preliminary Analysis Provided by another AI:**
+"${preliminaryAnalysis}"
+
+**Dataset Headers:** ${headers}
+**Dataset Field:** ${experiment.field}`;
+    const planResponse = await callAgentWithLog('Manager', 'gemini-2.5-flash', {
+        contents: managerPrompt,
+        config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
+    });
+    const analysisPlan = JSON.parse(planResponse).plan;
+    if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan.");
+    updateLog('Manager', `Analysis plan created with ${analysisPlan.length} visualizations.`);
+
+    // --- PHASE 3: EXECUTION ---
+    updateLog('System', '--- Phase 3: Chart Generation ---');
+    let successfulCharts = [];
+    for (const chartPlan of analysisPlan) {
+        updateLog('System', `Attempting to generate: ${chartPlan.goal}`);
+        let chartJson = '';
+        let success = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) updateLog('Doer', `Retrying generation (attempt ${attempt + 1})...`);
+            const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data. Your sole purpose is to execute a given instruction and generate a single, valid JSON object.
+**CRITICAL INSTRUCTIONS:**
+1.  **Parse Data Carefully:** The provided CSV data is your source of truth. The first row is always the header.
+2.  **Execute the Goal:** You must precisely follow the \`goal\` provided. This may require you to perform calculations like filtering, grouping, and averaging the data from the specified \`columns\`.
+3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A", "", null), you MUST ignore that entire row for your calculation. Do not treat it as zero.
+4.  **Output Format:** Your final output must be ONLY the raw JSON object that conforms to the schema. Do not include any text, explanations, or markdown fences (\`\`\`json\`\`\`).
+5.  **Chart-Specific Data Structures:**
+    *   For **'bar'** and **'line'** charts, the \`data.datasets[0].data\` property must be an array of numbers. The \`data.labels\` property must be an array of corresponding strings.
+    *   For **'scatter'** charts, the \`data.datasets[0].data\` property must be an array of objects, where each object is \`{x: number, y: number}\`. You do not need to provide \`data.labels\` for scatter plots.
+**Your Task:**
+*   **Goal:** "${chartPlan.goal}"
+*   **Chart Type:** "${chartPlan.chartType}"
+*   **Required Columns:** ${JSON.stringify(chartPlan.columns)}
+*   **Full CSV Data:**
+    \`\`\`csv
+    ${csvData}
+    \`\`\``;
+            const doerResponse = await callAgentWithLog('Doer', 'gemini-2.5-flash', {
+                contents: doerPrompt,
+                config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
+            });
+            if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
+                chartJson = doerResponse;
+                success = true;
+                break;
+            }
+        }
+        if (success) {
+            successfulCharts.push(JSON.parse(chartJson));
+            updateLog('System', `Successfully generated chart for: ${chartPlan.goal}`);
+        } else {
+            updateLog('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
+        }
+    }
+
+    if (successfulCharts.length === 0) {
+        updateLog('System', 'Warning: The Doer agent failed to generate any valid charts. The summarizer will analyze the raw data directly.');
+    }
+
+    // --- PHASE 4: SYNTHESIS ---
+    updateLog('System', '--- Phase 4: Final Summary ---');
+    const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${experiment.field}.
+You have been provided with the original analysis plan, any successfully generated charts (as Chart.js JSON), and the raw data.
+**Your Summary Must:**
+1.  Start with a brief overview of the dataset's structure.
+2.  If visualizations are provided, systematically discuss the findings from each one. Refer to them as Figure 1, Figure 2, etc. For each figure, explain what was plotted and what the key insight or trend is.
+3.  **If NO visualizations are provided, you MUST perform a detailed textual analysis of the raw data directly.** Describe any observable trends, correlations, or important statistical points based on the raw numbers.
+4.  Conclude with an overall interpretation of what the results mean in the context of the research field.
+5.  If any charts from the original plan failed to generate, you must mention that the analysis for that aspect could not be completed visually.
+**Original Analysis Plan:**
+${JSON.stringify(analysisPlan, null, 2)}
+**Successfully Generated Charts (as JSON):**
+${JSON.stringify(successfulCharts, null, 2)}
+**Raw CSV Data:**
+\`\`\`csv
+${csvData}
+\`\`\`
+Your output must be in Markdown format.`;
+    const finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
+
+    // --- FINAL ASSEMBLY ---
+    const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
+    return {
+        finalOutput: JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts }),
+        logSummary,
+    };
 };

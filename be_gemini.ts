@@ -44,13 +44,14 @@ export const callGeminiWithRetry = async (
     model: string,
     params: any,
     onLog?: (message: string) => void,
-    maxRetries = 5
+    maxRetries = 5,
+    timeout: number = 60000
 ) => {
     let attempt = 0;
     let delay = 2000; // Start with a 2-second delay
     while (attempt < maxRetries) {
         try {
-            const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }));
+            const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }), timeout);
             return response;
         } catch (error) {
             const errorMessage = error.toString();
@@ -308,13 +309,10 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
             expectJson = true;
             config.responseMimeType = "application/json";
             config.responseSchema = DATA_ANALYZER_SCHEMA;
-            const jsonInstructions = "Your final output must be ONLY a single, raw JSON object that conforms to the required schema. Do not include any text, explanations, or markdown fences. The 'chartSuggestions' array should only contain configurations for 'bar' or 'line' charts. If a table is more appropriate, describe it in the summary using Markdown. Ensure that within each chart configuration, 'data.datasets' is an array of objects and each 'dataset.data' is an array of numbers.";
-
-            if (settings.isAutomated) { // This is now used for the initial goal-setting call
-                basePrompt += `Analyze the following CSV data from a study in ${context.experimentField}: \n\`\`\`\n${userInput}\n\`\`\`\nFirst, determine the best statistical analysis method. Then, perform that analysis. Provide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
-            } else { // Fallback/default for the main agentic process trigger
-                 basePrompt += `Analyze the following CSV data from a study in ${context.experimentField}: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a detailed summary of the findings and suggest at least one relevant chart configuration. ${jsonInstructions}`;
-            }
+            // The prompt is simplified because the main logic for both manual and auto modes
+            // is now handled by dedicated agentic workflows, not this generic function.
+            // This prompt serves as a basic fallback.
+            basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a summary and suggest relevant charts. Your output MUST be a valid JSON object matching the schema.`;
             break;
         case 8:
             basePrompt += `You are tasked with drawing a conclusion for a scientific experiment in ${context.experimentField}. Use the following information:\n\n- **Research Question:** "${context.question}"\n- **Data Analysis Summary:** "${context.analysis_summary}"\n- **User's Additional Notes:** "${userInput}"\n\nBased ONLY on the information provided, write a formal conclusion. Your conclusion must directly address the final research question. It must explicitly state whether the hypothesis ("${context.hypothesis}") was supported, rejected, or if the results were inconclusive. You must also discuss the broader implications of the findings and acknowledge potential limitations of the study.`;
@@ -351,14 +349,16 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
     
     // A robust, rate-limited agent caller.
-    const callAgent = async (model: string, params: any, agentName: string) => {
+    const callAgent = async (model: string, params: any, agentName: string, timeout?: number) => {
         updateLog(agentName, 'is thinking...');
         const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        const response = await callGeminiWithRetry(gemini, model, params, logCallback);
+        const response = await callGeminiWithRetry(gemini, model, params, logCallback, 5, timeout);
         const result = response.text;
         updateLog(agentName, 'has completed its task.');
-        // Proactive delay to prevent rate limiting on sequential calls.
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // Proactive delay to prevent rate limiting on sequential calls, but skip for the final step.
+        if (agentName.toLowerCase() !== 'editor') {
+            await new Promise(resolve => setTimeout(resolve, 10000));
+        }
         return result;
     };
     
@@ -477,8 +477,16 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
 
     updateLog('Editor', 'Performing final editorial review...');
-    const polishPrompt = `You are a helpful scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}. Your goals are to: 1. Add a compelling title (as a Level 1 Markdown Header: # Title). 2. Improve the overall flow, clarity, and grammatical correctness. 3. Ensure a consistent and professional tone. The paper's target length is ${pageCount}. Do not drastically change the scientific content or conclusions. Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
-    const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor');
+    const polishPrompt = `You are a helpful scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
+Your goals are to:
+1.  Add a compelling title (as a Level 1 Markdown Header: # Title).
+2.  Improve the overall flow, clarity, and grammatical correctness.
+3.  Ensure a consistent and professional tone.
+
+**IMPORTANT**: Be efficient. Do not drastically change the scientific content or conclusions. Focus on polishing the existing text. The paper's target length is ${pageCount}.
+
+Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
+    const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor', 120000); // Increased 120-second timeout
     updateLog('System', 'Publication ready.');
     
     return finalText;

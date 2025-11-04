@@ -70,7 +70,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
 
 **Dataset Analysis:**
 1.  **Identify Data Types:** Examine the column headers and sample data to distinguish between categorical columns (e.g., names, groups, categories) and numerical columns (e.g., measurements, counts, scores).
-2.  **Propose Visualizations:** Based on your analysis, devise a plan for 2 to 3 distinct and meaningful visualizations that will reveal key insights from the data.
+2.  **Propose Visualizations:** Based on your analysis, devise a plan for 2 to 3 distinct and meaningful visualizations. Aim for 3 if the data's complexity and richness support it, otherwise 2 is sufficient.
 3.  **Prioritize Comparisons and Relationships:** Your plan should prioritize:
     *   **Bar charts** for comparing a numerical value across different categories.
     *   **Scatter plots** for exploring the relationship between two numerical values.
@@ -146,20 +146,23 @@ ${sampleData}
                     logCallback('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
                 }
             }
-            if (successfulCharts.length === 0) throw new Error("The Doer agent failed to generate any valid charts.");
+            
+            if (successfulCharts.length === 0) {
+                 logCallback('System', 'Warning: The Doer agent failed to generate any valid charts. The summarizer will analyze the raw data directly.');
+            }
 
             // PHASE 3: SYNTHESIS
             logCallback('System', '--- Phase 3: Final Summary ---');
             const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${activeExperiment.field}.
 
-You have been provided with the original analysis plan, the successfully generated charts (as Chart.js JSON), and the raw data.
+You have been provided with the original analysis plan, any successfully generated charts (as Chart.js JSON), and the raw data.
 
 **Your Summary Must:**
 1.  Start with a brief overview of the dataset's structure.
-2.  Systematically discuss the findings from each visualization. Refer to them as Figure 1, Figure 2, etc., in the order they were provided.
-3.  For each figure, explain what was plotted and what the key insight or trend is.
+2.  If visualizations are provided, systematically discuss the findings from each one. Refer to them as Figure 1, Figure 2, etc. For each figure, explain what was plotted and what the key insight or trend is.
+3.  **If NO visualizations are provided, you MUST perform a detailed textual analysis of the raw data directly.** Describe any observable trends, correlations, or important statistical points based on the raw numbers.
 4.  Conclude with an overall interpretation of what the results mean in the context of the research field.
-5.  If any charts from the original plan failed to generate, you must mention that the analysis for that aspect could not be completed.
+5.  If any charts from the original plan failed to generate, you must mention that the analysis for that aspect could not be completed visually.
 
 **Original Analysis Plan:**
 ${JSON.stringify(analysisPlan, null, 2)}
@@ -177,7 +180,6 @@ Your output must be in Markdown format.`;
 
             // Final Assembly
             const finalOutput = JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts });
-            // For the log summary, we'll create a concise summary of the plan.
             const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
             const finalStepData = { ...stepData, output: finalOutput, suggestedInput: logSummary };
             await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
@@ -185,8 +187,32 @@ Your output must be in Markdown format.`;
             addToast("Agentic analysis complete!", "success");
 
         } catch (error) {
-            addToast(parseGeminiError(error, `Agentic workflow failed.`), 'danger');
-            setAgenticRun(prev => ({ ...prev, status: 'failed', logs: [...prev.logs, { agent: 'System', message: `ERROR: ${error.message}`}]}));
+            const errorMessage = parseGeminiError(error, `Agentic workflow failed.`);
+            addToast(errorMessage, 'danger');
+            logCallback('System', `FATAL ERROR: ${error.message}. The workflow will now generate a fallback summary.`);
+            setAgenticRun(prev => ({ ...prev, status: 'running' })); // Keep it 'running' while we generate fallback
+
+            try {
+                // Generate a fallback summary
+                const fallbackPrompt = `An error occurred while trying to analyze and visualize the following data. Please provide a basic textual summary of the data. Start the summary by stating: "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:"\n\nData:\n${stepData.input}`;
+                const fallbackSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: fallbackPrompt });
+
+                // Assemble and save the fallback output
+                const finalOutput = JSON.stringify({ summary: fallbackSummary, chartSuggestions: [] });
+                const logSummary = `Workflow failed, but a fallback summary was generated.`;
+                const finalStepData = { ...stepData, output: finalOutput, suggestedInput: logSummary };
+                await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+                setAgenticRun(prev => ({ ...prev, status: 'success' })); // Now set to success as it's recoverable
+                addToast("Workflow failed, but a fallback summary was created. You can now proceed.", "success");
+            } catch (fallbackError) {
+                // If even the fallback fails, save a hardcoded error message
+                const finalErrorMessage = `A critical error occurred during the analysis, and a fallback summary could not be generated. Error: ${error.message}. Fallback Error: ${fallbackError.message}`;
+                const finalOutput = JSON.stringify({ summary: finalErrorMessage, chartSuggestions: [] });
+                const finalStepData = { ...stepData, output: finalOutput };
+                await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+                setAgenticRun(prev => ({ ...prev, status: 'failed' }));
+                addToast("A critical error occurred. Please review the output.", "danger");
+            }
         }
 
     }, [activeExperiment, gemini, addToast, updateExperiment, stepData]);

@@ -249,9 +249,9 @@ export const getStepContext = (experiment: Experiment, stepId: number): any => {
     if (stepId > 8) context.conclusion_summary = getStepSummary(8);
     if (stepId > 9) context.peer_review_summary = getStepSummary(9);
     
-    // For steps that need a full project log (like Peer Review and Publication),
+    // For steps that need a full project log (like Publication),
     // compile a log. Use full output for recent steps and summaries for older ones.
-    if (stepId === 9 || stepId === 10 || stepId === 13) { // Added step 13 for explanation generation
+    if (stepId === 10 || stepId === 13) { // Updated to remove step 9
         let projectLog = '';
         for (let i = 1; i < stepId; i++) {
             const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
@@ -341,7 +341,8 @@ Provide a comprehensive summary and a list of structured references within that 
             basePrompt += `Based on the data analysis summary: "${context.analysis_summary}", draw conclusions for the research project. Was the hypothesis "${context.hypothesis}" supported?`;
             break;
         case 9:
-             basePrompt += `Act as a peer reviewer. Critically review the entire research project based on this log and provide constructive feedback. Your persona is: ${settings.reviewerPersona || 'Harsh Critic'}. \n\nFULL PROJECT LOG:\n${context.full_project_summary_log}`;
+             // This case is now handled by the dedicated runPeerReviewAgent
+             basePrompt += `This step is now agentic. This prompt should not be used.`;
              break;
         case 10:
              // This case is now handled by the dedicated runPublicationAgent
@@ -481,6 +482,71 @@ ${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.expla
     const logSummary = `Generated ${generatedCharts.length} charts and a summary based on the analysis plan.`;
 
     return { finalOutput, logSummary };
+};
+
+
+/**
+ * Agentic workflow for Step 9: Peer Review Simulation. Iterates through steps 2-8 for focused critiques.
+ */
+export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
+    const getFullOutput = (sId: number) => experiment.stepData[sId]?.output || null;
+    const fineTuneSettings = experiment.fineTuneSettings[9] || {};
+    const reviewerPersona = fineTuneSettings.reviewerPersona || 'Harsh Critic';
+
+    const researchQuestion = getFullOutput(1);
+    if (!researchQuestion) {
+        throw new Error("Cannot run peer review without a research question (Step 1).");
+    }
+
+    let finalCritique = `## Peer Review Simulation\n\nThis is a simulated peer review of the research project, critiquing each major step individually.\n\n---\n\n`;
+    const stepsToReview = [2, 3, 4, 5, 6, 7, 8];
+
+    for (const stepId of stepsToReview) {
+        const stepInfo = WORKFLOW_STEPS.find(s => s.id === stepId);
+        updateLog('Reviewer', `Now reviewing Step ${stepId}: ${stepInfo.title}...`);
+
+        let documentToReview = getFullOutput(stepId);
+        if (!documentToReview) {
+            updateLog('System', `Skipping Step ${stepId} as no output was found.`);
+            finalCritique += `### Critique of Step ${stepId}: ${stepInfo.title}\n\n*No output was provided for this step, so no review could be conducted.*\n\n---\n\n`;
+            continue;
+        }
+
+        // For Step 7, which outputs JSON with images, we must review the summary text only.
+        if (stepId === 7) {
+            try {
+                const parsed = JSON.parse(documentToReview.replace(/```json/g, '').replace(/```/g, ''));
+                documentToReview = parsed.summary || "The data analysis summary was empty.";
+            } catch (e) {
+                documentToReview = "Could not parse the data analysis JSON. Reviewing raw text: " + documentToReview;
+            }
+        }
+        
+        const prompt = `You are an expert peer reviewer in the field of **${experiment.field}** acting with the persona of a **'${reviewerPersona}'**.
+Your task is to review a specific section of a research project.
+
+**Overall Research Question:**
+*${researchQuestion}*
+
+**Document to Review (from Step ${stepId}: ${stepInfo.title}):**
+---
+${documentToReview}
+---
+
+**Instructions:**
+Provide 1-4 concise, critical, and constructive feedback points on the document provided above.
+Format your response as a Markdown list. Focus on clarity, scientific rigor, potential weaknesses, and logical consistency in relation to the main research question. Do NOT review any images or charts, only the text.`;
+        
+        const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt }, (log) => updateLog('System', log));
+        const critique = response.text;
+
+        finalCritique += `### Critique of Step ${stepId}: ${stepInfo.title}\n\n${critique}\n\n---\n\n`;
+        updateLog('Reviewer', `Critique for Step ${stepId} complete.`);
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Pause between steps
+    }
+    
+    updateLog('System', 'All steps reviewed. Finalizing report.');
+    return finalCritique;
 };
 
 

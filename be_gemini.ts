@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -209,8 +204,8 @@ export const getStepContext = (experiment: Experiment, stepId: number): any => {
         context.full_project_summary_log = projectLog;
     }
     
-    // For presentation generation, we need the final draft specifically
-    if (stepId === 12) {
+    // For presentation generation and explanation, we need the final draft specifically
+    if (stepId === 12 || stepId === 13) {
         context.publication_draft = getFullOutput(10);
     }
 
@@ -338,6 +333,9 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
         case 12: // Virtual step for Presentation Outline
              basePrompt += `Based on the following scientific paper from the field of ${context.experimentField}, create a concise 10-slide presentation outline in Markdown format. Each slide heading should be a level 2 header (##). The slides should be: Title, Introduction/Background, Research Question, Methods, Key Results (1-2 slides with data points), Data Visualization (Chart description), Discussion, Conclusion, Future Work, and Q&A.\n\nPaper:\n${context.publication_draft}`;
             break;
+        case 13: // Virtual step for Plain English Explanation
+             basePrompt += `Summarize the following scientific paper in plain English, at a 12th-grade reading level. Avoid complex jargon and focus on the core research question, key findings, and their importance. Structure the explanation with clear Markdown headings (e.g., "### What Was the Goal?").\n\nPaper:\n${context.publication_draft}`;
+            break;
         default:
             basePrompt += `An unknown step was requested. Please provide general assistance.`;
     }
@@ -403,7 +401,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
                 let chartCount = 0;
                 const analysisOutput = experiment.stepData[7]?.output;
 
-                if (analysisOutput && typeof analysisOutput === 'string') {
+                if (analysisOutput && typeof analysisOutput === 'string' && analysisOutput.trim().startsWith('{')) {
                     try {
                         const analysisData = JSON.parse(analysisOutput);
                         const detailedSummary = analysisData.summary;
@@ -446,7 +444,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
 
         // 4. Generate captions and create final placeholders
         let chartConfigs = [];
-        if (experiment.stepData[7]?.output && typeof experiment.stepData[7].output === 'string') {
+        if (experiment.stepData[7]?.output && typeof experiment.stepData[7].output === 'string'  && experiment.stepData[7].output.trim().startsWith('{')) {
             try {
                 const analysisData = JSON.parse(experiment.stepData[7].output);
                 chartConfigs = analysisData.chartSuggestions || [];
@@ -475,16 +473,17 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
         const litReviewOutput = experiment.stepData[2]?.output;
         if (litReviewOutput && typeof litReviewOutput === 'string' && litReviewOutput.trim().startsWith('{')) {
             try {
-                const refs = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '')).references;
-                if (refs && refs.length > 0) {
+                const parsedData = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '').trim());
+                const refs = parsedData.references;
+                if (refs && Array.isArray(refs) && refs.length > 0) {
                      updateLog('System', `Formatting references in ${referenceStyle} style...`);
-                    const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
+                    const refsPrompt = `Format the following JSON reference list into a bibliography using a scientific format similar to ${referenceStyle}. For each entry, format it as: Author, A. A., & Author, B. B. (Year). Title of work. *Journal Title*, Volume(Issue), pages. If a URL is present, include it. Output only the formatted list in Markdown, with each reference as a separate paragraph.\n\nJSON:\n${JSON.stringify(refs, null, 2)}`;
                     const refsText = await callAgent('gemini-flash-lite-latest', { contents: refsPrompt }, 'Bibliographer');
                     paper += `\n## References\n\n${refsText}`;
                     updateLog('System', 'References section complete.');
                 }
             } catch (e) {
-                updateLog('System', 'Warning: Could not parse references from literature review step.');
+                updateLog('System', `Warning: Could not parse references from literature review step. Error: ${e.message}`);
             }
         }
 
@@ -564,7 +563,7 @@ Your task is to generate 3 diverse search queries suitable for a standard web se
 
 **Example of BAD queries (DO NOT DO THIS):**
 - ("atomic-scale engineering" OR "bond network modification") AND ("ultra-high temperature ceramics")
-- (materials science) AND (UHTCs OR "refractory materials") AND (stability > 5000 K)
+- (materials science) AND (UHTCs OR "refactory materials") AND (stability > 5000 K)
 
 Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", "query 2", "query 3"]`;
         const managerResponse = await callAgent('gemini-flash-lite-latest', { contents: managerPrompt }, 'Manager');
@@ -623,95 +622,92 @@ Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", 
 };
 
 /**
- * Executes a robust, single-agent workflow for data analysis using Gemini 2.5.
- * This function is designed to be self-healing: if the primary analysis fails,
- * it will automatically fall back to a text-only summary, ensuring it always resolves successfully.
+ * Executes a robust, multi-step agentic workflow for data analysis.
+ * This approach breaks down the complex task of analysis and visualization
+ * into smaller, more reliable steps to ensure a successful outcome.
  */
 export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
-    const callAgentWithLog = async (agentName: string, model: string, params: any) => {
+    const callAgentWithLog = async (agentName: string, model: string, params: any, timeout = 60000) => {
         updateLog(agentName, 'is thinking...');
         const retryLog = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        // Using a longer timeout for this complex single call
-        const response = await callGeminiWithRetry(gemini, model, params, retryLog, 5, 120000); 
+        const response = await callGeminiWithRetry(gemini, model, params, retryLog, 5, timeout);
         const result = response.text.trim();
-        updateLog('System', 'Analysis complete.');
+        updateLog(agentName, 'has completed its task.');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
         return result;
     };
 
     try {
-        updateLog('Data Scientist', 'Starting comprehensive data analysis with Gemini 2.5...');
-        
-        const mainPrompt = `You are an expert data scientist AI using Gemini 2.5. Your task is to perform a comprehensive analysis of the provided CSV data and generate a structured JSON output.
+        // --- STEP 1: Generate Summary ---
+        updateLog('Analyst', 'Analyzing data and generating a textual summary...');
+        const summaryPrompt = `You are an expert data scientist AI. Your first task is to analyze the provided CSV data and write a detailed interpretation in Markdown format.
+-   **Project Context:**
+    -   Field of Study: ${experiment.field}
+    -   Research Question: ${experiment.stepData[1]?.output ? JSON.parse(experiment.stepData[1].output).research_question : 'N/A'}
+    -   Hypothesis: ${experiment.stepData[3]?.output || 'N/A'}
+-   **Instructions:** Identify key trends, significant findings, correlations, and any potential outliers. Your summary should be insightful and relevant to the project's context. Do NOT suggest charts yet.
+-   **CSV Data:**
+    \`\`\`csv
+    ${csvData}
+    \`\`\``;
+        const summary = await callAgentWithLog('Analyst', 'gemini-2.5-flash', { contents: summaryPrompt });
 
-**Project Context:**
--   **Field of Study:** ${experiment.field}
--   **Research Question:** ${experiment.stepData[1]?.output ? JSON.parse(experiment.stepData[1].output).research_question : 'N/A'}
--   **Hypothesis:** ${experiment.stepData[3]?.output || 'N/A'}
-
-**Your Instructions:**
-1.  **Analyze the Data:** Carefully examine the CSV data.
-2.  **Write a Summary:** In the \`summary\` field, provide a detailed interpretation of the data in Markdown format. Identify key trends, significant findings, correlations, and any potential outliers. Your summary should be insightful and relevant to the project's context.
-3.  **Suggest Visualizations:** In the \`chartSuggestions\` array, create 2-3 diverse and meaningful visualizations.
-    *   Each object in the array MUST be a valid Chart.js configuration.
-    *   Choose appropriate chart types ('bar', 'line', 'scatter', etc.) to best represent the insights from the data.
-    *   Ensure the data structures in your Chart.js configs are correct (e.g., array of numbers for bar charts, array of {x, y} objects for scatter plots).
-
-**CRITICAL:** Your final output must be ONLY a single, raw JSON object that strictly conforms to the required schema.
-
-**CSV Data:**
-\`\`\`csv
-${csvData}
-\`\`\``;
-
-        const analysisJson = await callAgentWithLog('Data Scientist', 'gemini-2.5-flash', {
-            contents: mainPrompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: DATA_ANALYZER_SCHEMA,
-            }
+        // --- STEP 2: Plan Visualizations ---
+        updateLog('Planner', 'Creating a plan for data visualizations...');
+        const planPrompt = `You are a data visualization planner. Based on the provided CSV data and analysis summary, propose 2-3 diverse and meaningful visualizations.
+-   **Instructions:** For each visualization, describe its type, goal, and the exact column names needed. Your output must be a single, raw JSON object conforming to the required schema.
+-   **Analysis Summary:** ${summary}
+-   **CSV Data:**
+    \`\`\`csv
+    ${csvData}
+    \`\`\``;
+        const planJson = await callAgentWithLog('Planner', 'gemini-2.5-flash', {
+            contents: planPrompt,
+            config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
         });
+        const plan = JSON.parse(planJson).plan;
 
-        // Basic validation of the parsed response
-        const parsed = JSON.parse(analysisJson);
-        if (!parsed.summary || !parsed.chartSuggestions) {
-            throw new Error("AI response was valid JSON but missed required keys ('summary', 'chartSuggestions').");
+        // --- STEP 3: Generate Each Chart ---
+        const chartSuggestions = [];
+        for (let i = 0; i < plan.length; i++) {
+            const chartGoal = plan[i];
+            updateLog('Visualizer', `Generating Chart ${i + 1}/${plan.length}: ${chartGoal.goal}`);
+            const chartPrompt = `You are a Chart.js expert. Your task is to generate a single, valid Chart.js JSON configuration object.
+-   **Instructions:** Create a '${chartGoal.chartType}' chart to achieve this goal: "${chartGoal.goal}". Use the exact column names: ${chartGoal.columns.join(', ')}. Your output must be ONLY the raw JSON object conforming to the schema. Do not include any styling properties (like backgroundColor or borderColor).
+-   **CSV Data:**
+    \`\`\`csv
+    ${csvData}
+    \`\`\``;
+            try {
+                const chartJson = await callAgentWithLog('Visualizer', 'gemini-2.5-flash', {
+                    contents: chartPrompt,
+                    config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
+                });
+                chartSuggestions.push(JSON.parse(chartJson));
+            } catch (chartError) {
+                updateLog('System', `Warning: Failed to generate Chart ${i + 1}. Error: ${chartError.message}. Skipping this chart.`);
+            }
         }
 
+        // --- STEP 4: Assemble Final Output ---
+        const finalOutput = JSON.stringify({ summary, chartSuggestions }, null, 2);
+        updateLog('System', 'Data analysis and visualization complete.');
         return {
-            finalOutput: analysisJson,
-            logSummary: `Generated a comprehensive analysis with ${parsed.chartSuggestions.length} visualizations.`,
+            finalOutput,
+            logSummary: `Generated analysis with ${chartSuggestions.length} visualizations.`,
         };
 
     } catch (error) {
         const errorMessage = (error instanceof Error) ? error.message : String(error);
         updateLog('System', `A critical error occurred: ${errorMessage}. Attempting to generate a fallback text-only summary.`);
-
-        try {
-            const fallbackPrompt = `A critical error occurred during an automated attempt to analyze data and generate visualizations. Your task is to provide a basic textual summary of the data instead.
-**Instructions:**
-1.  Start your summary by stating: "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:"
-2.  Analyze the provided CSV data and describe any obvious trends, patterns, or key statistics you can find.
-3.  Keep the summary concise and in Markdown format.
-
-**Data:**
-\`\`\`csv
-${csvData}
-\`\`\``;
-            const fallbackSummary = await callAgentWithLog('System', 'gemini-2.5-flash', { contents: fallbackPrompt });
-            
-            updateLog('System', 'Fallback summary generated successfully.');
-            
-            return {
-                finalOutput: JSON.stringify({ summary: fallbackSummary, chartSuggestions: [] }),
-                logSummary: 'Workflow failed, but a fallback summary was generated.'
-            };
-        } catch (fallbackError) {
-             const finalErrorMessage = `A critical error occurred during the analysis, and a fallback summary could not be generated. Original Error: ${errorMessage}. Fallback Error: ${(fallbackError as Error).message}`;
-             updateLog('System', `CRITICAL: Fallback summary generation also failed.`);
-             return {
-                finalOutput: JSON.stringify({ summary: finalErrorMessage, chartSuggestions: [] }),
-                logSummary: 'Workflow and fallback summary generation both failed.'
-             };
-        }
+        // Fallback remains the same
+        const fallbackPrompt = `A critical error occurred during an automated attempt to analyze data and generate visualizations. Your task is to provide a basic textual summary of the data instead.
+- **Instructions:** Start your summary with "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:". Analyze the CSV data and describe any obvious trends. Keep the summary in Markdown format.
+- **Data:** \`\`\`csv\n${csvData}\n\`\`\``;
+        const fallbackSummary = await callAgentWithLog('System', 'gemini-2.5-flash', { contents: fallbackPrompt });
+        return {
+            finalOutput: JSON.stringify({ summary: fallbackSummary, chartSuggestions: [] }),
+            logSummary: 'Workflow failed, but a fallback summary was generated.'
+        };
     }
 };

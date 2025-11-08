@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useExperiment } from '../../context/ExperimentContext';
 import { WORKFLOW_STEPS } from '../../config';
 import { renderMarkdown } from '../../utils/markdownRenderer';
@@ -8,10 +8,12 @@ import { DataAnalysisView } from '../common/DataAnalysisView';
 import JSZip from 'jszip';
 import { Chart } from 'chart.js';
 import { ensureChartStyling } from '../../utils/chartUtils';
+import { getStepContext, getPromptForStep, callGeminiWithRetry, parseGeminiError } from '../../services';
 
 export const ProjectCompletionView = () => {
-    const { activeExperiment } = useExperiment();
+    const { activeExperiment, updateExperiment, gemini } = useExperiment();
     const { addToast } = useToast();
+    const [isGenerating, setIsGenerating] = useState(false);
     
     if (!activeExperiment) {
         return <div>Loading...</div>;
@@ -21,6 +23,8 @@ export const ProjectCompletionView = () => {
     const publicationText = stepData[10]?.output;
     const experimentalData = stepData[7]?.input;
     const analysisJson = stepData[7]?.output;
+    const explanationText = stepData[13]?.output;
+    
     let analysisData;
     try {
         analysisData = analysisJson ? JSON.parse(analysisJson) : null;
@@ -28,6 +32,29 @@ export const ProjectCompletionView = () => {
         analysisData = null;
     }
     const charts = analysisData?.chartSuggestions || [];
+
+    const handleGenerateExplanation = async () => {
+        if (!gemini || !publicationText || isGenerating) return;
+        
+        setIsGenerating(true);
+        try {
+            const context = getStepContext(activeExperiment, 13);
+            const { basePrompt, config } = getPromptForStep(13, '', context, {});
+            const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: basePrompt, config });
+            const newContent = response.text;
+
+            const updatedStepData = {
+                ...activeExperiment.stepData,
+                13: { ...(activeExperiment.stepData[13] || {}), output: newContent }
+            };
+            await updateExperiment({ ...activeExperiment, stepData: updatedStepData });
+            addToast("Explanation generated and saved.", "success");
+        } catch (error) {
+            addToast(parseGeminiError(error, "Failed to generate explanation."), 'danger');
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
     const handleDownloadPaper = (format: 'md' | 'txt' | 'doc' | 'pdf') => {
         if (!publicationText) {
@@ -222,6 +249,7 @@ export const ProjectCompletionView = () => {
 
             <ul className="nav nav-tabs" id="completionTabs" role="tablist">
                 <li className="nav-item" role="presentation"><button className="nav-link active" id="pub-tab" data-bs-toggle="tab" data-bs-target="#pub-pane">Publication</button></li>
+                <li className="nav-item" role="presentation"><button className="nav-link" id="explain-tab" data-bs-toggle="tab" data-bs-target="#explain-pane">Explain</button></li>
                 <li className="nav-item" role="presentation"><button className="nav-link" id="raw-tab" data-bs-toggle="tab" data-bs-target="#raw-pane">Raw Outputs</button></li>
                 <li className="nav-item" role="presentation"><button className="nav-link" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane">Experimental Data</button></li>
                 <li className="nav-item" role="presentation"><button className="nav-link" id="viz-tab" data-bs-toggle="tab" data-bs-target="#viz-pane">Visualizations</button></li>
@@ -230,6 +258,27 @@ export const ProjectCompletionView = () => {
             <div className="tab-content card" id="completionTabsContent">
                 <div className="tab-pane fade show active" id="pub-pane" role="tabpanel">
                      {publicationText ? <div className="p-3"><FinalPublicationView publicationText={publicationText} showRegenerate={false} onRegenerate={() => {}} /></div> : <div className="alert alert-warning m-3">The final publication draft has not been generated yet.</div>}
+                </div>
+                <div className="tab-pane fade" id="explain-pane" role="tabpanel">
+                    <div className="p-3">
+                        {isGenerating ? (
+                            <div className="text-center p-5">
+                                <div className="spinner-border mb-3" role="status"></div>
+                                <h5>AI is generating the explanation...</h5>
+                            </div>
+                        ) : explanationText ? (
+                            <div className="generated-text-container" dangerouslySetInnerHTML={{ __html: renderMarkdown(explanationText) }}></div>
+                        ) : (
+                            <div className="text-center p-5">
+                                <h5 className="fw-bold">Explain This Paper</h5>
+                                <p className="text-white-50">Generate a plain-English summary of the final paper, written at a 12th-grade reading level with minimal jargon.</p>
+                                <button className="btn btn-primary" onClick={handleGenerateExplanation} disabled={!publicationText}>
+                                    <i className="bi bi-stars me-1"></i> Generate Explanation
+                                </button>
+                                {!publicationText && <p className="text-warning small mt-2">The publication must be generated first.</p>}
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div className="tab-pane fade" id="raw-pane" role="tabpanel">
                      <div className="accordion accordion-flush p-3" id="rawOutputsAccordion">

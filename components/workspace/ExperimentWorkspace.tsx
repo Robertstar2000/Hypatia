@@ -339,7 +339,9 @@ export const ExperimentWorkspace = () => {
         if (!stepInfo) return <div>Error: Step not found.</div>;
         
         // After step 1, show the automation mode selector if not yet chosen
-        if (activeExperiment.currentStep > 1 && activeExperiment.automationMode === null && !isAutoGenerating) {
+        // BUG FIX: This condition is now more specific to only show on step 2,
+        // preventing it from appearing incorrectly on later steps.
+        if (activeExperiment.currentStep === 2 && activeExperiment.automationMode === null && !isAutoGenerating) {
             return <AutomationModeSelector onSelect={(mode) => {
                 const updated = {...activeExperiment, automationMode: mode};
                 updateExperiment(updated);

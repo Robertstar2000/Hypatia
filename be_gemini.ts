@@ -1,5 +1,6 @@
 
 
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -523,10 +524,19 @@ export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
         const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
         if (!stepInfo) continue;
         
-        const stepOutput = experiment.stepData[i]?.output;
+        let stepOutput = experiment.stepData[i]?.output;
+        let reviewNote = '';
+
         if (!stepOutput || stepOutput.trim() === '') {
             finalReviewDocument += `## Step ${i}: ${stepInfo.title}\n\n*   No output was found for this step. Review skipped.\n\n`;
             continue;
+        }
+
+        // Truncation/summarization logic to prevent 400 errors from oversized prompts.
+        const MAX_CHARS = 20000;
+        if (stepOutput.length > MAX_CHARS) {
+            stepOutput = experiment.stepData[i]?.summary || stepOutput.substring(0, MAX_CHARS) + "... (truncated)";
+            reviewNote = ' (Note: This review is based on a summary or truncated version of the step due to its length.)';
         }
 
         updateLog('Reviewer', `Analyzing Step ${i}: ${stepInfo.title}...`);
@@ -541,7 +551,7 @@ Overall Research Context:
 - Hypothesis: ${hypothesis}
 
 You are currently reviewing:
-- Step: "${stepInfo.title}"
+- Step: "${stepInfo.title}"${reviewNote}
 - Content of the step:
 ---
 ${stepOutput}

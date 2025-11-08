@@ -277,6 +277,13 @@ export const ExperimentWorkspace = () => {
         if (isLoading || !stepData.output) return;
 
         setIsLoading(true);
+
+        // Cooldown logic for after step 4.
+        if (activeStep === 4) {
+            addToast("Methodology design complete. Pausing for 60 seconds to ensure API stability before proceeding.", "info");
+            await new Promise(resolve => setTimeout(resolve, 60000));
+        }
+        
         try {
             let summaryText = '';
 

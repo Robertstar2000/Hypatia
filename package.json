@@ -15,7 +15,8 @@
     "@google/genai": "^1.11.0",
     "chart.js": "^4.4.3",
     "dexie": "^4.0.7",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "xlsx": "latest"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -213,7 +213,7 @@ export const PublicationExporter = () => {
     };
     
     if (agenticRun.status === 'running') {
-        return <AgenticAnalysisView agenticRun={{...agenticRun, maxIterations: 7}} />;
+        return <AgenticAnalysisView agenticRun={{...agenticRun, maxIterations: 7}} title="Publication Agent is Writing..." subtitle="The AI agent team is outlining, writing, and formatting your paper." />;
     }
 
     if (!publicationText) {

@@ -1,6 +1,8 @@
 
+
 import React, { useState } from 'react';
 import { useToast } from '../../toast';
+import * as XLSX from 'xlsx';
 
 export const DataUploader = ({ onComplete }) => {
     const [file, setFile] = useState<File | null>(null);
@@ -10,20 +12,39 @@ export const DataUploader = ({ onComplete }) => {
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0];
         if (selectedFile) {
-            if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
-                setFile(selectedFile);
-                const reader = new FileReader();
+            setFile(selectedFile);
+            const reader = new FileReader();
+
+            if (selectedFile.name.endsWith('.csv')) {
                 reader.onload = (event) => {
                     const content = event.target?.result as string;
                     setFileContent(content);
                 };
-                reader.onerror = () => {
-                    addToast('Error reading file.', 'danger');
-                };
                 reader.readAsText(selectedFile);
+            } else if (selectedFile.name.endsWith('.xlsx')) {
+                reader.onload = (event) => {
+                    try {
+                        const data = event.target?.result;
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[sheetName];
+                        const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+                        setFileContent(csvContent);
+                        addToast("Excel file parsed successfully.", 'success');
+                    } catch (error) {
+                        console.error("Error parsing XLSX file:", error);
+                        addToast('Error parsing .xlsx file.', 'danger');
+                        setFile(null);
+                        setFileContent('');
+                        e.target.value = '';
+                    }
+                };
+                reader.readAsArrayBuffer(selectedFile);
             } else {
-                addToast('Please upload a valid .csv file.', 'warning');
+                addToast('Please upload a valid .csv or .xlsx file.', 'warning');
                 e.target.value = ''; // Reset file input
+                setFile(null);
+                setFileContent('');
             }
         }
     };
@@ -40,13 +61,13 @@ export const DataUploader = ({ onComplete }) => {
     return (
         <div>
             <h6 className="fw-bold">Upload Your Dataset</h6>
-            <p className="text-white-50 small">Please select a CSV file from your computer.</p>
+            <p className="text-white-50 small">Please select a CSV or Excel (.xlsx) file from your computer.</p>
             <div className="mb-3">
-                <input type="file" className="form-control" accept=".csv" onChange={handleFileChange} />
+                <input type="file" className="form-control" accept=".csv,.xlsx" onChange={handleFileChange} />
             </div>
             {fileContent && (
                 <div className="mb-3">
-                    <label className="form-label small">File Preview:</label>
+                    <label className="form-label small">File Preview (as CSV):</label>
                     <textarea className="form-control" readOnly rows={8} value={fileContent} />
                 </div>
             )}

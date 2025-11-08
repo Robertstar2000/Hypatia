@@ -66,7 +66,7 @@ export const PeerReviewWorkspace = ({ onStepComplete }) => {
     if (agenticRun.status === 'running' || (agenticRun.status === 'failed' && agenticRun.logs.length > 0)) {
         return (
             <div>
-                 <AgenticAnalysisView agenticRun={agenticRun} />
+                 <AgenticAnalysisView agenticRun={agenticRun} title="Peer Review Simulation in Progress" subtitle="The AI Reviewer is critiquing each step of the project."/>
                  {agenticRun.status === 'failed' && 
                     <div className="text-center mt-3">
                         <button className="btn btn-primary" onClick={performAgenticReview}>

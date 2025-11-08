@@ -8,6 +8,7 @@ export const CodeSimulator = ({ onComplete, context }) => {
     const { activeExperiment, updateExperiment, gemini } = useExperiment();
     const [code, setCode] = useState(activeExperiment.stepData[6]?.input || '');
     const [isInitializing, setIsInitializing] = useState(false);
+    const [initLogs, setInitLogs] = useState([]);
     const { addToast } = useToast();
     const workerRef = useRef<Worker | null>(null);
 
@@ -70,13 +71,63 @@ export const CodeSimulator = ({ onComplete, context }) => {
 
     useEffect(() => {
         if (!code && gemini) {
-            setIsInitializing(true);
-            const prompt = `You are an expert in writing Javascript simulations for scientific research in the field of ${context.experimentField}. Based on the following methodology and data collection plan, write a JavaScript simulation. The code must use \`hypatia.finish(csvData, summary)\` to return its results. The data should be in CSV format. Use logic and terminology appropriate for ${context.experimentField}. Output ONLY the raw JavaScript code without any explanations or markdown backticks.\n\nMethodology Summary:\n${context.methodology_summary}\n\nData Collection Plan Summary:\n${context.data_collection_plan_summary}`;
-            
-            callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt })
-                .then(response => handleCodeChange(response.text.trim()))
-                .catch(err => addToast(parseGeminiError(err, "AI failed to generate initial simulation code."), "danger"))
-                .finally(() => setIsInitializing(false));
+            const runInitializationAgent = async () => {
+                setIsInitializing(true);
+                setInitLogs([]);
+
+                const log = (agent, message) => setInitLogs(prev => [...prev, { agent, message }]);
+
+                try {
+                    // Agent 1: Simplifier
+                    log('Simplifier', 'Reading hypothesis, methodology, and data plan to create a simplified simulation goal...');
+                    const simplifierPrompt = `You are a research assistant. Your job is to simplify complex research plans into a clear, concise goal for a programmer.
+                    
+                    **Primary Goal:** Create simple instructions to simulate only the #1 hypothesis. Extract the core intent from the methodology and data plan. Prioritize simplicity and a clear outcome over complex details.
+                    
+                    **Hypothesis:**
+                    ${context.hypothesis}
+                    
+                    **Methodology Summary:**
+                    ${context.methodology_summary}
+                    
+                    **Data Collection Plan:**
+                    ${context.data_collection_plan_summary}
+                    
+                    **Output:** A short, one-paragraph instruction set for the programmer. For example: "Simulate a 30-day period. Each day, increase a 'growth_factor' by a random amount between 0.1 and 0.5. Track the 'total_size' which is affected by the growth factor. The final CSV should have 'day' and 'total_size' columns."`;
+
+                    const simplifierResponse = await callGeminiWithRetry(gemini, 'gemini-flash-lite-latest', { contents: simplifierPrompt });
+                    const simplifiedInstructions = simplifierResponse.text;
+                    log('Simplifier', 'Simplified instructions created.');
+                    log('Instructions', simplifiedInstructions);
+
+                    // Agent 2: Coder
+                    log('Coder', 'Generating simulation code based on simplified instructions...');
+                    const coderPrompt = `You are an expert in writing simple, error-free Javascript simulations for scientific research in the field of ${context.experimentField}.
+                    
+                    **Your Goal:** Write a straightforward JavaScript simulation based *only* on the following instructions. The code MUST run successfully. Do not add complexity. Prioritize generating working code over perfectly simulating every detail.
+                    
+                    **Instructions:**
+                    ${simplifiedInstructions}
+                    
+                    **Rules:**
+                    1. The code must use \`hypatia.finish(csvData, summary)\` to return its results.
+                    2. The first argument to \`hypatia.finish\` must be a string in CSV format.
+                    3. The second argument must be a brief, one-sentence summary string.
+                    4. Output ONLY the raw JavaScript code without any explanations or markdown backticks.`;
+
+                    const coderResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: coderPrompt });
+                    handleCodeChange(coderResponse.text.trim());
+                    log('Coder', 'Code generated successfully.');
+
+                } catch (err) {
+                    addToast(parseGeminiError(err, "AI failed to generate initial simulation code."), "danger");
+                    log('System', `Error: ${parseGeminiError(err)}`);
+                } finally {
+                    setIsInitializing(false);
+                }
+            };
+
+            runInitializationAgent();
         }
     }, [gemini, context, code, addToast]);
 
@@ -171,7 +222,15 @@ export const CodeSimulator = ({ onComplete, context }) => {
                     The AI has generated the following JavaScript code based on your methodology. This code will be executed in a secure sandbox. It must call `hypatia.finish(csvData, summary)` to pass its results to the next step.
                 </p>
             </div>
-            {isInitializing && <div className="text-center p-3"><div className="spinner-border spinner-border-sm"></div> Initializing code...</div>}
+            {isInitializing && (
+                <div className="mb-3">
+                    <AgenticAnalysisView 
+                        agenticRun={{ logs: initLogs, iterations: 0, maxIterations: 0 }} 
+                        title="AI is Initializing Code"
+                        subtitle="A two-step agent workflow is simplifying the requirements and generating the initial script."
+                    />
+                </div>
+            )}
             <textarea
                 id="code-editor"
                 className="form-control mb-3"
@@ -189,7 +248,11 @@ export const CodeSimulator = ({ onComplete, context }) => {
                 </button>
             </div>
             {(agenticRun.status === 'running' || agenticRun.logs.length > 0) &&
-                <AgenticAnalysisView agenticRun={agenticRun} />
+                <AgenticAnalysisView 
+                    agenticRun={agenticRun} 
+                    title="Agentic Debugger is Active" 
+                    subtitle="The AI is running and debugging the simulation code." 
+                />
             }
         </div>
     );

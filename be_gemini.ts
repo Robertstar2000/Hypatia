@@ -1,5 +1,7 @@
 
 
+
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -498,7 +500,7 @@ export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
         throw new Error("Cannot run peer review without a research question (Step 1).");
     }
 
-    let finalCritique = `## Peer Review Simulation\n\nThis is a simulated peer review of the research project, critiquing each major step individually.\n\n---\n\n`;
+    let finalCritique = `## Peer Review Simulation\n\nThis is a simulated peer review of the research project. The following is a collection of critiques for each major step, structured as actionable feedback for the author.\n\n---\n\n`;
     const stepsToReview = [2, 3, 4, 5, 6, 7, 8];
 
     for (const stepId of stepsToReview) {
@@ -523,7 +525,7 @@ export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
         }
         
         const prompt = `You are an expert peer reviewer in the field of **${experiment.field}** acting with the persona of a **'${reviewerPersona}'**.
-Your task is to review a specific section of a research project.
+Your task is to review a specific section of a research project and provide actionable feedback.
 
 **Overall Research Question:**
 *${researchQuestion}*
@@ -534,8 +536,10 @@ ${documentToReview}
 ---
 
 **Instructions:**
-Provide 1-4 concise, critical, and constructive feedback points on the document provided above.
-Format your response as a Markdown list. Focus on clarity, scientific rigor, potential weaknesses, and logical consistency in relation to the main research question. Do NOT review any images or charts, only the text.`;
+1.  Critique ONLY the scientific content of the document provided above. Do not comment on the AI agents or prompts that may have generated it.
+2.  Your feedback MUST be formatted as a Markdown list of actionable instructions for the author to improve the quality of the final publication.
+3.  Focus on clarity, scientific rigor, potential weaknesses, and logical consistency.
+4.  Do NOT review any images or charts, only the text.`;
         
         const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt }, (log) => updateLog('System', log));
         const critique = response.text;
@@ -557,6 +561,25 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     const fullContext = getStepContext(experiment, 10).full_project_summary_log;
     let finalDoc = '';
 
+    // Extract chart information from Step 7 to provide explicit instructions to the Writer agent.
+    let chartInfo = '';
+    const analysisOutput = experiment.stepData[7]?.output;
+    if (analysisOutput) {
+        try {
+            const analysisData = JSON.parse(analysisOutput.replace(/```json/g, '').replace(/```/g, '').trim());
+            if (analysisData.charts && Array.isArray(analysisData.charts) && analysisData.charts.length > 0) {
+                chartInfo = `
+The following charts from the data analysis are available for you to embed in the results section. You MUST embed them using the exact placeholder format [CHART_X: Your descriptive caption here], where X is the 1-based index number.
+
+Available Charts:
+${analysisData.charts.map((chart, index) => `- CHART_${index + 1}: Titled "${chart.title}"`).join('\n')}
+`;
+            }
+        } catch (e) {
+            updateLog('System', 'Warning: Could not parse chart information from Step 7 for the publication writer.');
+        }
+    }
+
     // Agent 1: Manager (Outliner)
     updateLog('Manager', 'Analyzing project log to create a publication outline...');
     const outlinePrompt = `You are a scientific editor. Based on the provided research log, create a standard publication outline as a JSON array of strings (e.g., ["Abstract", "Introduction", "Methodology", "Results", "Discussion", "Conclusion", "References"]). Research Log:\n\n${fullContext}`;
@@ -569,7 +592,26 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     const sections = {};
     for (const section of outline) {
         updateLog('Writer', `Drafting section: ${section}...`);
-        const writerPrompt = `You are a scientific writer. Using the full research log, write the "${section}" section of a scientific paper. For the 'Results' section, insert placeholders like [CHART_1: A descriptive caption], [CHART_2: Another caption], etc., where charts should appear. For the 'References' section, format them professionally. Full Log:\n\n${fullContext}`;
+        
+        // Default prompt for all sections
+        let writerPrompt = `You are a scientific writer. Using the full research log, write the "${section}" section of a scientific paper. For the 'References' section, format them professionally. Full Log:\n\n${fullContext}`;
+        
+        // If writing the "Results" section and we have chart info, use a more specific prompt
+        if (section.toLowerCase().includes('result') && chartInfo) {
+            writerPrompt = `You are a scientific writer. Your task is to write the "${section}" section of a scientific paper based on the full research log provided.
+        
+${chartInfo}
+
+You must discuss the findings and integrate these chart placeholders naturally into the text where they are relevant.
+
+Full Research Log:
+${fullContext}
+`;
+        } else if (section.toLowerCase().includes('result')) {
+            // Fallback for results section if no charts were found.
+            writerPrompt = `You are a scientific writer. Using the full research log, write the "${section}" section of a scientific paper. Describe the findings from the data analysis. No charts are available to be embedded. For the 'References' section, format them professionally. Full Log:\n\n${fullContext}`;
+        }
+
         const sectionResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: writerPrompt }, (log) => updateLog('System', log), 5, 120000);
         sections[section] = sectionResponse.text;
         updateLog('Writer', `"${section}" section complete.`);

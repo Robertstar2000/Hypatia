@@ -66,7 +66,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     }, [stepData.output, agenticRun.status, performAgenticAnalysis]);
 
     if (agenticRun.status === 'running') {
-        return <AgenticAnalysisView agenticRun={agenticRun} />;
+        return <AgenticAnalysisView agenticRun={agenticRun} subtitle="A multi-agent workflow is analyzing your data and generating visualizations." />;
     }
 
     // If failed, show the logs and a retry button to give the user context and a path forward.

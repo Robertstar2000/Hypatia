@@ -60,7 +60,7 @@ export const LiteratureReviewWorkspace = ({ onStepComplete }) => {
     }, []); // Only run once on mount if there's no output
 
     if (agenticRun.status === 'running') {
-        return <AgenticAnalysisView agenticRun={agenticRun} />;
+        return <AgenticAnalysisView agenticRun={agenticRun} subtitle="The AI is conducting a literature search using Google Search." />;
     }
 
     return (

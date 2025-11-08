@@ -8,6 +8,7 @@ import { CodeSimulator } from './CodeSimulator';
 import { ManualDataEntry } from './ManualDataEntry';
 import { DataSynthesizer } from './DataSynthesizer';
 import { DataUploader } from '../../landing/DataUploader';
+import { cleanAndFormatCsv } from '../../../utils/csvUtils';
 
 type ExperimentMode = 'simulate' | 'manual' | 'synthesize' | 'upload';
 
@@ -17,15 +18,16 @@ export const ExperimentRunner = ({ onStepComplete }) => {
     const { activeExperiment, updateExperiment } = useExperiment();
 
     const handleDataSubmission = (data: string, summary: string) => {
+        const cleanedData = cleanAndFormatCsv(data);
         const currentStepData = activeExperiment.stepData || {};
         const newStepData = {
             ...currentStepData,
-            6: { ...(currentStepData[6] || {}), output: summary, summary: summary, input: data },
-            7: { ...(currentStepData[7] || {}), input: data }
+            6: { ...(currentStepData[6] || {}), output: summary, summary: summary, input: cleanedData },
+            7: { ...(currentStepData[7] || {}), input: cleanedData }
         };
         const updatedExperiment = { ...activeExperiment, stepData: newStepData };
         updateExperiment(updatedExperiment);
-        addToast("Data submitted successfully! You can now complete this step.", "success");
+        addToast("Data submitted and formatted successfully! You can now complete this step.", "success");
         onStepComplete();
     };
     

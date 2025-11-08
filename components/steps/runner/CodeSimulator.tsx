@@ -112,6 +112,7 @@ export const CodeSimulator = ({ onComplete, context }) => {
     const runAgenticSimulation = async () => {
         setAgenticRun(prev => ({ ...prev, status: 'running', logs: [], iterations: 0 }));
         let currentCode = code;
+        let lastError: string = `Maximum attempts (${agenticRun.maxIterations}) reached without a successful run.`;
 
         for (let i = 0; i < agenticRun.maxIterations; i++) {
             setAgenticRun(prev => ({ ...prev, iterations: i + 1, logs: [...prev.logs, { agent: 'System', message: `--- Attempt ${i + 1} of ${agenticRun.maxIterations} ---` }] }));
@@ -128,10 +129,13 @@ export const CodeSimulator = ({ onComplete, context }) => {
                     onComplete(result.payload.data, result.payload.summary);
                     return; // Exit the loop
                 }
-                 setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'Debugger', message: `Code ran without errors but did not call hypatia.finish(). Retrying to ensure it does.` }] }));
-                 throw new Error("Code did not call hypatia.finish().");
+                 const noFinishError = "Code ran without errors but did not call hypatia.finish().";
+                 lastError = noFinishError;
+                 setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'Debugger', message: noFinishError }] }));
+                 throw new Error(noFinishError);
 
             } catch (error) {
+                lastError = error as string;
                 setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'Debugger', message: `Execution failed. Error: ${error}` }] }));
                 
                 const debuggerPrompt = `You are a debugger agent specializing in scientific simulations in the field of ${context.experimentField}. The following Javascript code failed to execute with the error: "${error}". The code is intended to run in a sandboxed environment where it must call 'hypatia.finish(csvString, summaryString)' to return a result. Analyze the code and the error, and provide a corrected version of the full script using terminology and logic appropriate for ${context.experimentField}. Output ONLY the raw corrected javascript code.\n\n---\n\nCODE:\n${currentCode}`;
@@ -143,8 +147,9 @@ export const CodeSimulator = ({ onComplete, context }) => {
                     setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent: 'Debugger', message: 'Attempting a fix...' }] }));
                 } catch (geminiError) {
                     const errorMessage = parseGeminiError(geminiError);
-                    setAgenticRun(prev => ({ ...prev, status: 'failed', logs: [...prev.logs, { agent: 'System', message: `Debugger agent failed: ${errorMessage}` }] }));
-                    addToast("Debugger agent failed to provide a fix.", "danger");
+                    lastError = `Debugger agent failed: ${errorMessage}`;
+                    setAgenticRun(prev => ({ ...prev, status: 'failed', logs: [...prev.logs, { agent: 'System', message: lastError }] }));
+                    addToast(lastError, "danger");
                     return; // Exit loop if debugger fails
                 }
             }
@@ -152,7 +157,7 @@ export const CodeSimulator = ({ onComplete, context }) => {
 
         // If loop finishes without success
         setAgenticRun(prev => ({ ...prev, status: 'failed' }));
-        addToast(`Agentic simulation failed to produce a result after ${agenticRun.maxIterations} attempts.`, 'danger');
+        addToast(`Agentic simulation failed. Last known error: ${lastError}`, 'danger');
     };
 
     return (

@@ -95,18 +95,13 @@ This document outlines the logical flow of the Project Hypatia application in a 
 
 #### E. Agentic Data Analyzer (Step 7) (`DataAnalysisWorkspace`)
 
--   When this component mounts, it automatically triggers the `performAgenticAnalysis` workflow if no output exists.
--   **Agent Workflow:**
-    1.  **System Agent:** Performs an initial, robust text-only analysis of the raw CSV data to generate a high-quality summary and determine the single most important insight to visualize.
-    2.  **Manager Agent:** Sets the overall goal (e.g., "Create a bar chart comparing categories").
-    3.  **Loop (Doer -> QA):**
-        -   **Doer Agent:** Receives instructions from the Manager (and feedback from the QA). Its sole job is to generate a Chart.js JSON object that strictly adheres to a predefined schema.
-        -   **QA Agent:** Receives the Doer's JSON. It performs two checks:
-            a.  **Programmatic Validation:** Does the JSON parse correctly? Does it have the required keys? Can it be rendered by Chart.js without throwing an error?
-            b.  **AI Validation:** Does the chart accurately represent the data and fulfill the Manager's original goal?
-        -   The QA agent outputs a `pass: boolean` and `feedback: string`.
-    4.  If `pass` is `false`, the feedback is sent back to the Manager to start the next iteration. If `true`, the loop terminates.
-    5.  The final, validated chart JSON and the initial summary are saved as the step's output.
+-   When this component mounts, it automatically triggers the `runDataAnalysisAgent` workflow if no output exists.
+-   **Simplified Agentic Workflow (with Gemini 2.5):**
+    1.  **Data Scientist Agent**: A single, powerful AI agent (`gemini-2.5-flash`) is invoked with the full project context (research question, hypothesis) and the raw CSV data.
+    2.  **One-Shot Analysis**: The agent's task is to perform a comprehensive analysis, write a detailed summary in Markdown, and generate 2-3 valid Chart.js JSON configurations for visualization, all in a single response.
+    3.  **Structured Output**: The AI is constrained to output a single JSON object that strictly conforms to a predefined schema, ensuring the data is immediately usable by the application.
+    4.  **Fallback Mechanism**: If the AI fails to produce a valid structured response, a fallback mechanism is triggered to generate a text-only summary, ensuring the user is never blocked.
+    5.  The final JSON, containing the summary and chart configurations, is saved as the step's output.
 
 #### F. Agentic Publication Exporter (Step 10) (`PublicationExporter`)
 

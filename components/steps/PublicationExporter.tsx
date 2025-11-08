@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { renderMarkdown } from '../../utils/markdownRenderer';
 import {
@@ -211,6 +212,12 @@ export const PublicationExporter = () => {
     const stepData = activeExperiment.stepData[10] || {};
     const publicationText = stepData.output || '';
 
+    // Use a ref to hold the most current experiment state to prevent stale closures in async functions.
+    const experimentRef = useRef(activeExperiment);
+    useEffect(() => {
+        experimentRef.current = activeExperiment;
+    }, [activeExperiment]);
+
     const startPublicationGeneration = async () => {
         if (agenticRun.status === 'running') return;
 
@@ -218,16 +225,16 @@ export const PublicationExporter = () => {
 
         try {
             const finalDoc = await runPublicationAgent({
-                experiment: activeExperiment,
+                experiment: experimentRef.current, // Use the ref to get the latest state.
                 gemini,
                 updateLog: (agent, message) => {
                     setAgenticRun(prev => ({ ...prev, logs: [...prev.logs, { agent, message }] }));
                 }
             });
             const updatedExperiment = {
-                ...activeExperiment,
+                ...experimentRef.current, // Use the ref here as well.
                 stepData: {
-                    ...activeExperiment.stepData,
+                    ...experimentRef.current.stepData,
                     10: { ...stepData, output: finalDoc }
                 },
                 currentStep: 11

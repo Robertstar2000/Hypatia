@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
@@ -16,7 +18,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     const [agenticRun, setAgenticRun] = useState({
         status: 'idle', // 'idle', 'running', 'success', 'failed'
         iterations: 0,
-        maxIterations: 4, // 4 phases: System, Manager, Doer(s), Summarizer
+        maxIterations: 2, // Simplified workflow with Gemini 2.5
         logs: [],
     });
 
@@ -28,7 +30,7 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
             return;
         }
 
-        setAgenticRun({ status: 'running', logs: [], iterations: 0, maxIterations: 4 });
+        setAgenticRun({ status: 'running', logs: [], iterations: 0, maxIterations: 2 });
         const logCallback = (agent: string, message: string) => {
             setAgenticRun(prev => {
                 const newLogs = [...prev.logs, { agent, message }];

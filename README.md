@@ -158,8 +158,9 @@ This step is a powerful, multi-modal hub for generating your experimental data. 
 -   For complex experiments, you can use external tools like Google Colab. Once your simulation is complete, export your data as a CSV and use the **Upload Your Data** option to bring it into Project Hypatia.
 
 **C) Agentic AI Simulation**
+-   **This is a unique agentic workflow specific to Step 6.**
 1.  **AI Writes the Code**: The AI will read your methodology from Step 4 and automatically write a JavaScript simulation.
-2.  **Agentic Debugging**: When you click "Start Agentic Simulation," an AI Debugger agent takes over. It runs the code in a secure sandbox.
+2.  **Agentic Debugging**: When you click "Start Agentic Simulation," an AI **Debugger Agent** takes over. It runs the code in a secure sandbox.
 3.  **Autonomous Correction**: If the code fails, the Debugger agent analyzes the error, rewrites the code to fix it, and retries. This loop continues until the code runs successfully and produces data, or until it reaches a maximum number of attempts.
 4.  **Completion**: The final, working code and its data output are saved to the step.
 

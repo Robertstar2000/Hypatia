@@ -2,6 +2,8 @@
 
 
 
+
+
 import { GoogleGenAI } from "@google/genai";
 import {
     Experiment,
@@ -352,137 +354,146 @@ Your final output must be ONLY a single, raw JSON object that conforms to the re
  * @returns {Promise<string>} The final, formatted publication text in Markdown.
  */
 export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
-    
-    // A robust, rate-limited agent caller.
-    const callAgent = async (model: string, params: any, agentName: string, timeout?: number) => {
-        updateLog(agentName, 'is thinking...');
-        const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        const response = await callGeminiWithRetry(gemini, model, params, logCallback, 5, timeout);
-        const result = response.text;
-        updateLog(agentName, 'has completed its task.');
-        // Proactive delay to prevent rate limiting on sequential calls, but skip for the final step.
-        if (agentName.toLowerCase() !== 'editor') {
-            await new Promise(resolve => setTimeout(resolve, 10000));
-        }
-        return result;
-    };
-    
-    // 1. Get full context and fine-tuning settings
-    const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
-    const fineTuneSettings = experiment.fineTuneSettings[10] || {};
-    const scientificField = experiment.field;
-    const referenceStyle = fineTuneSettings.referenceStyle || 'APA';
-    const pageCount = fineTuneSettings.pageCount || 'Standard (5-7 pages)';
-    
-    updateLog('System', `Project context compiled. Field: ${scientificField}. Style: ${referenceStyle}. Length: ${pageCount}.`);
-
-    // 2. Outline
-    const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
-    const outlineText = await callAgent('gemini-flash-lite-latest', { contents: outlinePrompt }, 'Manager');
-    let sections;
     try {
-      sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
-    } catch {
-      sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"];
-    }
-    updateLog('Manager', `Paper outline confirmed: ${sections.join(', ')}`);
-    
-    let paper = '';
-
-    // 3. Write sections
-    for (const section of sections) {
-        if (section.toLowerCase() === 'references') continue; // Handle this specifically later
+        // A robust, rate-limited agent caller.
+        const callAgent = async (model: string, params: any, agentName: string, timeout?: number) => {
+            updateLog(agentName, 'is thinking...');
+            const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
+            const response = await callGeminiWithRetry(gemini, model, params, logCallback, 5, timeout);
+            const result = response.text;
+            updateLog(agentName, 'has completed its task.');
+            // Proactive delay to prevent rate limiting on sequential calls, but skip for the final step.
+            if (agentName.toLowerCase() !== 'editor') {
+                await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+            return result;
+        };
         
-        updateLog('Writer', `Drafting ${section}...`);
+        // 1. Get full context and fine-tuning settings
+        const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
+        const fineTuneSettings = experiment.fineTuneSettings[10] || {};
+        const scientificField = experiment.field;
+        const referenceStyle = fineTuneSettings.referenceStyle || 'APA';
+        const pageCount = fineTuneSettings.pageCount || 'Standard (5-7 pages)';
         
-        let sectionPrompt;
-        if (section.toLowerCase() === "results") {
-            let analysisContext = '';
-            let chartCount = 0;
-            const analysisOutput = experiment.stepData[7]?.output;
+        updateLog('System', `Project context compiled. Field: ${scientificField}. Style: ${referenceStyle}. Length: ${pageCount}.`);
 
-            if (analysisOutput) {
-                try {
-                    const analysisData = JSON.parse(analysisOutput);
-                    const detailedSummary = analysisData.summary;
-                    const charts = analysisData.chartSuggestions || [];
-                    
-                    if (!detailedSummary) throw new Error("Analysis JSON is missing the 'summary' field.");
+        // 2. Outline
+        const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
+        const outlineText = await callAgent('gemini-flash-lite-latest', { contents: outlinePrompt }, 'Manager');
+        let sections;
+        try {
+          sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
+        } catch {
+          sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"];
+        }
+        updateLog('Manager', `Paper outline confirmed: ${sections.join(', ')}`);
+        
+        let paper = '';
 
-                    analysisContext = detailedSummary; // Start with the detailed summary.
-                    chartCount = charts.length;
+        // 3. Write sections
+        for (const section of sections) {
+            if (section.toLowerCase() === 'references') continue; // Handle this specifically later
+            
+            updateLog('Writer', `Drafting ${section}...`);
+            
+            let sectionPrompt;
+            if (section.toLowerCase() === "results") {
+                let analysisContext = '';
+                let chartCount = 0;
+                const analysisOutput = experiment.stepData[7]?.output;
 
-                    if (chartCount > 0) {
-                        let chartDescriptions = "\n\nThe following data visualizations were generated and must be described in the results section. You must refer to them as Figure 1, Figure 2, etc.:\n";
-                        charts.forEach((chart, index) => {
-                            const chartType = chart.type || 'N/A';
-                            const chartLabel = chart.data?.datasets?.[0]?.label || 'Untitled Chart';
-                            const dataPoints = chart.data?.datasets?.[0]?.data?.length || 0;
-                            chartDescriptions += `- Figure ${index + 1}: A '${chartType}' chart titled '${chartLabel}' that visualizes ${dataPoints} data points.\n`;
-                        });
-                        analysisContext += chartDescriptions;
+                if (analysisOutput && typeof analysisOutput === 'string') {
+                    try {
+                        const analysisData = JSON.parse(analysisOutput);
+                        const detailedSummary = analysisData.summary;
+                        const charts = analysisData.chartSuggestions || [];
+                        
+                        if (!detailedSummary) throw new Error("Analysis JSON is missing the 'summary' field.");
+
+                        analysisContext = detailedSummary; // Start with the detailed summary.
+                        chartCount = charts.length;
+
+                        if (chartCount > 0) {
+                            let chartDescriptions = "\n\nThe following data visualizations were generated and must be described in the results section. You must refer to them as Figure 1, Figure 2, etc.:\n";
+                            charts.forEach((chart, index) => {
+                                const chartType = chart.type || 'N/A';
+                                const chartLabel = chart.data?.datasets?.[0]?.label || 'Untitled Chart';
+                                const dataPoints = chart.data?.datasets?.[0]?.data?.length || 0;
+                                chartDescriptions += `- Figure ${index + 1}: A '${chartType}' chart titled '${chartLabel}' that visualizes ${dataPoints} data points.\n`;
+                            });
+                            analysisContext += chartDescriptions;
+                        }
+                    } catch (e) {
+                        console.error("Could not parse analysis data for publication agent:", e);
+                        analysisContext = `[ERROR: The data analysis from Step 7 could not be read or is corrupted. Please state in the results section that the detailed analysis is unavailable due to a data processing error. The short summary of the analysis was: "${getStepContext(experiment, 8).analysis_summary}"]`;
+                        chartCount = 0;
                     }
-                } catch (e) {
-                    console.error("Could not parse analysis data for publication agent:", e);
-                    analysisContext = `[ERROR: The data analysis from Step 7 could not be read or is corrupted. Please state in the results section that the detailed analysis is unavailable due to a data processing error. The short summary of the analysis was: "${getStepContext(experiment, 8).analysis_summary}"]`;
+                } else {
+                    analysisContext = "[ERROR: No data analysis output from Step 7 was found. Please state in the results section that the analysis is missing.]";
                     chartCount = 0;
                 }
+                
+                sectionPrompt = `Write the "${section}" section for a paper in ${scientificField}. The paper should be a ${pageCount} document. Describe the findings based on this analysis context: "${analysisContext}". Crucially, if the context contains an error message, you must report that error clearly in this section. Otherwise, you MUST insert placeholders for all ${chartCount} charts where appropriate in the text. Use the format [CHART_1], [CHART_2], etc. The placeholder number should correspond to the Figure number in the context.`;
             } else {
-                analysisContext = "[ERROR: No data analysis output from Step 7 was found. Please state in the results section that the analysis is missing.]";
-                chartCount = 0;
+                 sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
             }
             
-            sectionPrompt = `Write the "${section}" section for a paper in ${scientificField}. The paper should be a ${pageCount} document. Describe the findings based on this analysis context: "${analysisContext}". Crucially, if the context contains an error message, you must report that error clearly in this section. Otherwise, you MUST insert placeholders for all ${chartCount} charts where appropriate in the text. Use the format [CHART_1], [CHART_2], etc. The placeholder number should correspond to the Figure number in the context.`;
-        } else {
-             sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
+            const sectionText = await callAgent('gemini-flash-lite-latest', { contents: sectionPrompt }, 'Writer');
+            paper += `\n## ${section}\n\n${sectionText}\n`;
+            updateLog('Writer', `${section} section complete.`);
+        }
+
+        // 4. Generate captions and create final placeholders
+        let chartConfigs = [];
+        if (experiment.stepData[7]?.output && typeof experiment.stepData[7].output === 'string') {
+            try {
+                const analysisData = JSON.parse(experiment.stepData[7].output);
+                chartConfigs = analysisData.chartSuggestions || [];
+            } catch (e) {
+                updateLog('System', 'Warning: Could not parse Step 7 chart data for captioning.');
+            }
+        }
+
+        if (chartConfigs.length > 0) {
+            updateLog('System', 'Generating chart captions...');
+            for (let i = 0; i < chartConfigs.length; i++) {
+                const chartConfig = chartConfigs[i] || {};
+                const chartType = chartConfig.type || 'chart';
+                const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
+                const analysisSummary = JSON.parse(experiment.stepData[7].output).summary || '';
+
+                const captionPrompt = `Write a descriptive caption for a scientific chart in the field of ${scientificField}. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisSummary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
+                const caption = await callAgent('gemini-flash-lite-latest', { contents: captionPrompt }, 'Captioner');
+                const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
+                paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
+            }
+            updateLog('System', 'Captions generated and embedded.');
         }
         
-        const sectionText = await callAgent('gemini-flash-lite-latest', { contents: sectionPrompt }, 'Writer');
-        paper += `\n## ${section}\n\n${sectionText}\n`;
-        updateLog('Writer', `${section} section complete.`);
-    }
-
-    // 4. Generate captions and create final placeholders
-    const analysisData = JSON.parse(experiment.stepData[7]?.output || '{}');
-    const chartConfigs = analysisData.chartSuggestions || [];
-    if (chartConfigs.length > 0) {
-        updateLog('System', 'Generating chart captions...');
-        for (let i = 0; i < chartConfigs.length; i++) {
-            const chartConfig = chartConfigs[i] || {};
-            const chartType = chartConfig.type || 'chart';
-            const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
-
-            const captionPrompt = `Write a descriptive caption for a scientific chart in the field of ${scientificField}. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisData.summary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
-            const caption = await callAgent('gemini-flash-lite-latest', { contents: captionPrompt }, 'Captioner');
-            const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
-            paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
-        }
-        updateLog('System', 'Captions generated and embedded.');
-    }
-    
-    // 5. Format References
-    const litReviewOutput = experiment.stepData[2]?.output;
-    if (litReviewOutput) {
-        try {
-            const refs = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '')).references;
-            if (refs && refs.length > 0) {
-                 updateLog('System', `Formatting references in ${referenceStyle} style...`);
-                const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
-                const refsText = await callAgent('gemini-flash-lite-latest', { contents: refsPrompt }, 'Bibliographer');
-                paper += `\n## References\n\n${refsText}`;
-                updateLog('System', 'References section complete.');
+        // 5. Format References
+        const litReviewOutput = experiment.stepData[2]?.output;
+        if (litReviewOutput && typeof litReviewOutput === 'string' && litReviewOutput.trim().startsWith('{')) {
+            try {
+                const refs = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '')).references;
+                if (refs && refs.length > 0) {
+                     updateLog('System', `Formatting references in ${referenceStyle} style...`);
+                    const refsPrompt = `Format the following JSON reference list into a ${referenceStyle}-style bibliography. Output only the formatted list in Markdown.\n\n${JSON.stringify(refs)}`;
+                    const refsText = await callAgent('gemini-flash-lite-latest', { contents: refsPrompt }, 'Bibliographer');
+                    paper += `\n## References\n\n${refsText}`;
+                    updateLog('System', 'References section complete.');
+                }
+            } catch (e) {
+                updateLog('System', 'Warning: Could not parse references from literature review step.');
             }
-        } catch (e) {
-            updateLog('System', 'Warning: Could not parse references from literature review step.');
         }
-    }
 
-    // 6. Final Polish
-    updateLog('System', 'Pausing for 60 seconds to cool down before the final, large editing task to avoid rate limits.');
-    await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
+        // 6. Final Polish
+        updateLog('System', 'Pausing for 60 seconds to cool down before the final, large editing task to avoid rate limits.');
+        await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
 
-    updateLog('Editor', 'Performing final editorial review...');
-    const polishPrompt = `You are an efficient scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
+        updateLog('Editor', 'Performing final editorial review...');
+        const polishPrompt = `You are an efficient scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
 Your goals are to:
 1.  Add a compelling title (as a Level 1 Markdown Header: # Title).
 2.  Improve the overall flow, clarity, and grammatical correctness.
@@ -494,10 +505,17 @@ Your goals are to:
 -   **TARGET LENGTH**: The paper's target length is ${pageCount}.
 
 Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
-    const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor', 120000); // Increased 120-second timeout
-    updateLog('System', 'Publication ready.');
-    
-    return finalText;
+        const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor', 120000); // Increased 120-second timeout
+        updateLog('System', 'Publication ready.');
+        
+        return finalText;
+    } catch (error) {
+        // This top-level catch ensures that any unexpected error within the agent workflow is caught.
+        console.error("A critical error occurred within the publication agent workflow:", error);
+        updateLog('System', `FATAL ERROR: ${error.message}`);
+        // Re-throw a more informative error to be caught by the UI component.
+        throw new Error(`Publication agent failed. Internal error: ${error.message}`);
+    }
 };
 
 
@@ -605,169 +623,71 @@ Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", 
 };
 
 /**
- * Internal helper to validate a Chart.js JSON string against basic structural requirements.
- */
-const isChartJsonValid = (jsonString: string, chartType: string): boolean => {
-    try {
-        const chart = JSON.parse(jsonString);
-        if (chart.type !== chartType) return false;
-        if (!chart.data || !Array.isArray(chart.data.datasets) || chart.data.datasets.length === 0) return false;
-        const dataset = chart.data.datasets[0];
-        if (!dataset.data || !Array.isArray(dataset.data) || dataset.data.length === 0) return false;
-        if (chartType === 'scatter') {
-            const firstPoint = dataset.data[0];
-            if (typeof firstPoint !== 'object' || firstPoint.x === undefined || firstPoint.y === undefined) return false;
-        } else { // bar or line
-            if (!Array.isArray(chart.data.labels) || chart.data.labels.length === 0) return false;
-        }
-        return true;
-    } catch (e) {
-        return false;
-    }
-};
-
-/**
- * Executes a robust, multi-agent workflow for data analysis.
- * This function is designed to be used by both manual and automated modes.
- * It is self-healing: if any agent fails, it will catch the error and
- * generate a fallback summary, ensuring it always resolves successfully.
+ * Executes a robust, single-agent workflow for data analysis using Gemini 2.5.
+ * This function is designed to be self-healing: if the primary analysis fails,
+ * it will automatically fall back to a text-only summary, ensuring it always resolves successfully.
  */
 export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
-    
     const callAgentWithLog = async (agentName: string, model: string, params: any) => {
         updateLog(agentName, 'is thinking...');
         const retryLog = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        const response = await callGeminiWithRetry(gemini, model, params, retryLog);
+        // Using a longer timeout for this complex single call
+        const response = await callGeminiWithRetry(gemini, model, params, retryLog, 5, 120000); 
         const result = response.text.trim();
-        updateLog(agentName, 'has completed its task.');
-        await new Promise(resolve => setTimeout(resolve, 4000)); // Proactive delay
+        updateLog('System', 'Analysis complete.');
         return result;
     };
 
     try {
-        // --- PHASE 1: PRE-ANALYSIS ---
-        updateLog('System', '--- Phase 1: Preliminary Analysis ---');
-        const dataLines = csvData.split('\n');
-        const headers = dataLines[0];
-        const sampleData = dataLines.slice(0, 6).join('\n'); // Header + 5 rows
+        updateLog('Data Scientist', 'Starting comprehensive data analysis with Gemini 2.5...');
+        
+        const mainPrompt = `You are an expert data scientist AI using Gemini 2.5. Your task is to perform a comprehensive analysis of the provided CSV data and generate a structured JSON output.
 
-        const systemPrompt = `You are a data science assistant. Your task is to perform a preliminary analysis of a CSV dataset based on its headers and a data sample.
-1.  List the column names.
-2.  For each column, identify it as either 'Categorical' (contains non-numeric text, groups, or identifiers) or 'Numerical' (contains numbers that can be measured or counted).
-3.  Based on this, suggest 2-3 interesting relationships or comparisons that could be visualized to find insights. Be specific. For example: "Compare the average 'Score' across different 'Treatment' groups", or "Explore the relationship between 'Temperature' and 'Yield'".
-Your output must be a brief but clear text summary. This summary will be given to another AI to create a formal plan.
-**Dataset Headers:** ${headers}
-**Dataset Field:** ${experiment.field}
-**Dataset Sample (first 5 rows):**
-\`\`\`csv
-${sampleData}
-\`\`\``;
-        const preliminaryAnalysis = await callAgentWithLog('System', 'gemini-flash-lite-latest', { contents: systemPrompt });
-        updateLog('System', `Preliminary analysis complete. Identified key relationships.`);
+**Project Context:**
+-   **Field of Study:** ${experiment.field}
+-   **Research Question:** ${experiment.stepData[1]?.output ? JSON.parse(experiment.stepData[1].output).research_question : 'N/A'}
+-   **Hypothesis:** ${experiment.stepData[3]?.output || 'N/A'}
 
-        // --- PHASE 2: PLANNING ---
-        updateLog('System', '--- Phase 2: Analysis Planning ---');
-        const managerPrompt = `You are a senior data scientist AI agent. Your task is to convert a preliminary textual analysis into a structured JSON analysis plan.
+**Your Instructions:**
+1.  **Analyze the Data:** Carefully examine the CSV data.
+2.  **Write a Summary:** In the \`summary\` field, provide a detailed interpretation of the data in Markdown format. Identify key trends, significant findings, correlations, and any potential outliers. Your summary should be insightful and relevant to the project's context.
+3.  **Suggest Visualizations:** In the \`chartSuggestions\` array, create 2-3 diverse and meaningful visualizations.
+    *   Each object in the array MUST be a valid Chart.js configuration.
+    *   Choose appropriate chart types ('bar', 'line', 'scatter', etc.) to best represent the insights from the data.
+    *   Ensure the data structures in your Chart.js configs are correct (e.g., array of numbers for bar charts, array of {x, y} objects for scatter plots).
 
-**CRITICAL INSTRUCTIONS:**
--   You must generate a single, valid JSON object that conforms to the required schema.
--   The "plan" should contain 2-3 distinct visualizations based on the suggestions in the preliminary analysis.
--   The \`goal\` for each visualization must be a highly specific, one-sentence instruction for a "Doer" agent. It must specify the exact aggregation (e.g., "average", "total") and any filtering required.
+**CRITICAL:** Your final output must be ONLY a single, raw JSON object that strictly conforms to the required schema.
 
-**Preliminary Analysis Provided by another AI:**
-"${preliminaryAnalysis}"
-
-**Dataset Headers:** ${headers}
-**Dataset Field:** ${experiment.field}`;
-        const planResponse = await callAgentWithLog('Manager', 'gemini-2.5-flash', {
-            contents: managerPrompt,
-            config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
-        });
-        const analysisPlan = JSON.parse(planResponse).plan;
-        if (!analysisPlan || analysisPlan.length === 0) throw new Error("Manager agent failed to produce a valid analysis plan.");
-        updateLog('Manager', `Analysis plan created with ${analysisPlan.length} visualizations.`);
-
-        // --- PHASE 3: EXECUTION ---
-        updateLog('System', '--- Phase 3: Chart Generation ---');
-        let successfulCharts = [];
-        for (const chartPlan of analysisPlan) {
-            updateLog('System', `Attempting to generate: ${chartPlan.goal}`);
-            let chartJson = '';
-            let success = false;
-            for (let attempt = 0; attempt < 3; attempt++) {
-                if (attempt > 0) updateLog('Doer', `Retrying generation (attempt ${attempt + 1})...`);
-                const doerPrompt = `You are a "Doer" AI agent that specializes in creating Chart.js JSON configurations from CSV data. Your sole purpose is to execute a given instruction and generate a single, valid JSON object.
-**CRITICAL INSTRUCTIONS:**
-1.  **Parse Data Carefully:** The provided CSV data is your source of truth. The first row is always the header.
-2.  **Execute the Goal:** You must precisely follow the \`goal\` provided. This may require you to perform calculations like filtering, grouping, and averaging the data from the specified \`columns\`.
-3.  **Handle Bad Data:** When processing columns for numerical data, if you encounter non-numeric values (e.g., "N/A", "", null, or any text), you MUST ignore that entire row for your calculation. Do not treat it as zero. This is the most common reason for failure.
-4.  **Output Format:** Your final output must be ONLY the raw JSON object that conforms to the schema. Do not include any text, explanations, or markdown fences (\`\`\`json\`\`\`).
-5.  **Chart-Specific Data Structures:**
-    *   For **'bar'** and **'line'** charts, the \`data.datasets[0].data\` property must be an array of numbers. The \`data.labels\` property must be an array of corresponding strings. The lengths of these two arrays MUST be equal.
-    *   For **'scatter'** charts, the \`data.datasets[0].data\` property must be an array of objects, where each object is \`{x: number, y: number}\`. You do not need to provide \`data.labels\` for scatter plots.
-**Your Task:**
-*   **Goal:** "${chartPlan.goal}"
-*   **Chart Type:** "${chartPlan.chartType}"
-*   **Required Columns:** ${JSON.stringify(chartPlan.columns)}
-*   **Full CSV Data:**
-    \`\`\`csv
-    ${csvData}
-    \`\`\``;
-                const doerResponse = await callAgentWithLog('Doer', 'gemini-2.5-flash', {
-                    contents: doerPrompt,
-                    config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
-                });
-                if (isChartJsonValid(doerResponse, chartPlan.chartType)) {
-                    chartJson = doerResponse;
-                    success = true;
-                    break;
-                }
-            }
-            if (success) {
-                successfulCharts.push(JSON.parse(chartJson));
-                updateLog('System', `Successfully generated chart for: ${chartPlan.goal}`);
-            } else {
-                updateLog('System', `Failed to generate a valid chart for: "${chartPlan.goal}" after 3 attempts. Moving on.`);
-            }
-        }
-
-        if (successfulCharts.length === 0) {
-            updateLog('System', 'Warning: The Doer agent failed to generate any valid charts. The summarizer will analyze the raw data directly.');
-        }
-
-        // --- PHASE 4: SYNTHESIS ---
-        updateLog('System', '--- Phase 4: Final Summary ---');
-        const summarizerPrompt = `You are a scientific communication AI agent. Your task is to write a detailed, comprehensive summary and interpretation of a data analysis for a research project in the field of ${experiment.field}.
-You have been provided with the original analysis plan, any successfully generated charts (as Chart.js JSON), and the raw data.
-**Your Summary Must:**
-1.  Start with a brief overview of the dataset's structure.
-2.  If visualizations are provided, systematically discuss the findings from each one. Refer to them as Figure 1, Figure 2, etc. For each figure, explain what was plotted and what the key insight or trend is.
-3.  **If NO visualizations are provided, you MUST perform a detailed textual analysis of the raw data directly.** Describe any observable trends, correlations, or important statistical points based on the raw numbers.
-4.  Conclude with an overall interpretation of what the results mean in the context of the research field.
-5.  If any charts from the original plan failed to generate, you must mention that the analysis for that aspect could not be completed visually.
-**Original Analysis Plan:**
-${JSON.stringify(analysisPlan, null, 2)}
-**Successfully Generated Charts (as JSON):**
-${JSON.stringify(successfulCharts, null, 2)}
-**Raw CSV Data:**
+**CSV Data:**
 \`\`\`csv
 ${csvData}
-\`\`\`
-Your output must be in Markdown format.`;
-        const finalSummary = await callAgentWithLog('Summarizer', 'gemini-2.5-flash', { contents: summarizerPrompt });
+\`\`\``;
 
-        // --- FINAL ASSEMBLY ---
-        const logSummary = `Generated ${successfulCharts.length}/${analysisPlan.length} planned visualizations.`;
+        const analysisJson = await callAgentWithLog('Data Scientist', 'gemini-2.5-flash', {
+            contents: mainPrompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: DATA_ANALYZER_SCHEMA,
+            }
+        });
+
+        // Basic validation of the parsed response
+        const parsed = JSON.parse(analysisJson);
+        if (!parsed.summary || !parsed.chartSuggestions) {
+            throw new Error("AI response was valid JSON but missed required keys ('summary', 'chartSuggestions').");
+        }
+
         return {
-            finalOutput: JSON.stringify({ summary: finalSummary, chartSuggestions: successfulCharts }),
-            logSummary,
+            finalOutput: analysisJson,
+            logSummary: `Generated a comprehensive analysis with ${parsed.chartSuggestions.length} visualizations.`,
         };
+
     } catch (error) {
         const errorMessage = (error instanceof Error) ? error.message : String(error);
-        updateLog('System', `FATAL WORKFLOW ERROR: ${errorMessage}. Attempting to generate a fallback summary.`);
+        updateLog('System', `A critical error occurred: ${errorMessage}. Attempting to generate a fallback text-only summary.`);
 
         try {
-            const fallbackPrompt = `A critical error occurred during an automated multi-agent attempt to analyze and visualize the following data. Your task is to provide a basic textual summary of the data instead.
+            const fallbackPrompt = `A critical error occurred during an automated attempt to analyze data and generate visualizations. Your task is to provide a basic textual summary of the data instead.
 **Instructions:**
 1.  Start your summary by stating: "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:"
 2.  Analyze the provided CSV data and describe any obvious trends, patterns, or key statistics you can find.

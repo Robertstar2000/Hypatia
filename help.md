@@ -127,7 +127,7 @@ Accessible from the header, the Lab Notebook is a free-form text area for your p
 6.  **Experiment Runner / Data Synthesis**: This is a powerful virtual lab with five distinct modes:
     -   **Upload Your Data**: Upload your own dataset in CSV format.
     -   **External Simulation (Google Colab)**: Guidance for using external tools and then uploading the results.
-    -   **Agentic AI Simulation**: An AI writes and **autonomously debugs** a JavaScript simulation until it runs successfully.
+    -   **Agentic AI Simulation**: In this mode, an AI agent writes JavaScript code for your experiment, then another AI agent (the Debugger) runs the code, catches errors, and rewrites it until it succeeds. This agentic process is unique to Step 6.
     -   **Manual Data Entry**: The AI generates a structured table for you to fill in.
     -   **AI Data Synthesis**: The AI generates a plausible, synthetic dataset for theoretical exploration.
 7.  **Data Analyzer**: A team of AI agents collaborates to analyze your data. A **System Agent** finds insights, a **Manager** sets a goal, a **Doer** generates a Chart.js visualization, and a **QA Agent** validates it. This loop repeats until a valid chart is produced.

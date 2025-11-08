@@ -26,12 +26,15 @@ export const ApiKeySection = ({ onAuthenticate }) => {
     return (
         <div className="getting-started-fields mx-auto api-key-section">
             <form onSubmit={handleSubmit}>
-                <p className="fw-bold text-light">Authenticate to Begin</p>
-                <p className="small text-white-50 mb-3">
-                    Please provide your Google Gemini API key to activate AI features. Your key is used only for this session and is not stored. You can get your free Gemini API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary-glow">Google AI Studio</a>.
-                </p>
+                <p className="fw-bold text-light">Connect to Google Gemini</p>
+                <div className="alert alert-info small">
+                    <i className="bi bi-info-circle-fill me-2"></i>
+                    To use Project Hypatia, you need a Google Gemini API key. This is the <strong>recommended and most reliable</strong> way to use the app. Your key is not stored and only used for this session.
+                </div>
                 <div className="mb-3">
+                    <label htmlFor="apiKeyInput" className="form-label visually-hidden">Gemini API Key</label>
                     <input
+                        id="apiKeyInput"
                         type="password"
                         className="form-control"
                         placeholder="Enter your Gemini API Key"
@@ -40,20 +43,30 @@ export const ApiKeySection = ({ onAuthenticate }) => {
                         disabled={isAuthenticating || !!promoCode}
                         aria-label="Gemini API Key"
                     />
+                     <div className="form-text">
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary-glow">Get your free Gemini API key from Google AI Studio &raquo;</a>
+                    </div>
                 </div>
-                <div className="text-center text-white-50 my-2">OR</div>
+
+                <div className="text-center text-white-50 my-2 small">--- or ---</div>
+
                 <div className="mb-3">
+                     <label htmlFor="promoCodeInput" className="form-label visually-hidden">Promo Code</label>
                     <input
+                        id="promoCodeInput"
                         type="text"
                         className="form-control"
-                        placeholder="Enter a Promo Code"
+                        placeholder="Enter a Promo Code (if available)"
                         value={promoCode}
                         onChange={(e) => { setPromoCode(e.target.value); setApiKey(''); }}
                         disabled={isAuthenticating || !!apiKey}
                         aria-label="Promo Code"
                     />
+                    <div className="form-text text-warning">
+                        Note: Promo code access may be limited or expired. Using your own API key is recommended.
+                    </div>
                 </div>
-                <button type="submit" className="btn btn-primary btn-lg w-100" disabled={isAuthenticating}>
+                <button type="submit" className="btn btn-primary btn-lg w-100 mt-2" disabled={isAuthenticating}>
                     {isAuthenticating ? 'Validating...' : 'Unlock Hypatia'}
                 </button>
             </form>

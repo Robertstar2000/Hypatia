@@ -60,11 +60,7 @@ export const App = () => {
         let keyToUse: string | undefined = undefined;
     
         if (type === 'promo' && value.toUpperCase() === 'MTI') {
-            keyToUse = process.env.API_KEY;
-            if (!keyToUse) {
-                addToast("Promo code is valid, but no default API key is configured for this session.", 'danger');
-                return;
-            }
+            keyToUse = 'AIzaSyB6vMtFqA6D5Fp7XLg28KaB5Z3eeEFoNqQ';
         } else if (type === 'key' && value) {
             keyToUse = value;
         } else {
@@ -79,11 +75,20 @@ export const App = () => {
                 setGemini(geminiInstance);
                 addToast("Authentication successful! Welcome to Project Hypatia.", 'success');
             } else {
-                throw new Error("Invalid API Key provided.");
+                setGemini(null);
+                if (type === 'promo') {
+                    addToast("The promo code's internal API key has expired. Please use your own personal Gemini API key for reliable access.", 'danger');
+                } else {
+                    addToast("The provided API Key is not valid. Please check the key and try again.", 'danger');
+                }
             }
         } catch (error) {
             setGemini(null);
-            addToast(parseGeminiError(error, "Authentication failed. The key or code is not valid."), 'danger');
+             if (type === 'promo') {
+                addToast("The promo code's internal API key has expired or is invalid. Please use your own personal Gemini API key.", 'danger');
+            } else {
+                addToast(parseGeminiError(error, "Authentication failed. The key is not valid."), 'danger');
+            }
         }
     };
 

@@ -1,6 +1,5 @@
 
 
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -94,31 +93,25 @@ export const callGeminiWithRetry = async (
     timeout: number = 60000
 ) => {
     let attempt = 0;
-    let delay = 30000; // Start with a 30-second delay for exponential backoff
+    let delay = 2000; // Start with a 2-second delay for exponential backoff
     while (attempt < maxRetries) {
         try {
             const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }), timeout);
             return response;
         } catch (error) {
-            const errorMessage = error.toString().toLowerCase();
-            const isNonRetriableError = 
-                errorMessage.includes('api key not valid') || 
-                error.status === 'INVALID_ARGUMENT' || 
-                errorMessage.includes('400');
-
-            if (!isNonRetriableError && attempt < maxRetries - 1) {
+            const errorMessage = error.toString();
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+            const isTimeoutError = errorMessage.includes('timed out');
+            
+            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
-                const reason = errorMessage.includes('429') || error.status === 'RESOURCE_EXHAUSTED'
-                    ? 'rate limit hit'
-                    : errorMessage.includes('timed out')
-                    ? 'timed out'
-                    : 'a transient error occurred';
-                
+                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
+
                 // Prioritize server-suggested delay, otherwise use exponential backoff
                 const serverDelay = getRetryDelay(error);
                 const retryAfterMs = serverDelay ?? delay;
                 
-                const logMessage = `Call failed because ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const logMessage = `Call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 
                 await new Promise(resolve => setTimeout(resolve, retryAfterMs));
@@ -128,7 +121,7 @@ export const callGeminiWithRetry = async (
                     delay *= 2; 
                 }
             } else {
-                throw error; // Rethrow for non-retriable errors or if max retries are reached
+                throw error; // Rethrow for other errors or if max retries are reached
             }
         }
     }
@@ -144,35 +137,28 @@ export const callGeminiStreamWithRetry = async (
     model: string,
     params: any,
     onLog?: (message: string) => void,
-    maxRetries = 5,
-    timeout: number = 120000
+    maxRetries = 5
 ) => {
     let attempt = 0;
-    let delay = 30000;
+    let delay = 2000;
     while (attempt < maxRetries) {
         try {
-            const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }), timeout);
+            const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }));
             return stream;
         } catch (error) {
-            const errorMessage = error.toString().toLowerCase();
-            const isNonRetriableError = 
-                errorMessage.includes('api key not valid') || 
-                error.status === 'INVALID_ARGUMENT' || 
-                errorMessage.includes('400');
-
-            if (!isNonRetriableError && attempt < maxRetries - 1) {
+            const errorMessage = error.toString();
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+            const isTimeoutError = errorMessage.includes('timed out');
+            
+            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
-                const reason = errorMessage.includes('429') || error.status === 'RESOURCE_EXHAUSTED'
-                    ? 'rate limit hit'
-                    : errorMessage.includes('timed out')
-                    ? 'timed out'
-                    : 'a transient error occurred';
+                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
 
                 // Prioritize server-suggested delay, otherwise use exponential backoff
                 const serverDelay = getRetryDelay(error);
                 const retryAfterMs = serverDelay ?? delay;
                 
-                const logMessage = `Streaming call failed because ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const logMessage = `Streaming call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 
                 await new Promise(resolve => setTimeout(resolve, retryAfterMs));
@@ -355,7 +341,6 @@ Provide a comprehensive summary and a list of structured references within that 
             basePrompt += `Based on the data analysis summary: "${context.analysis_summary}", draw conclusions for the research project. Was the hypothesis "${context.hypothesis}" supported?`;
             break;
         case 9:
-             // This step is now handled by the dedicated runPeerReviewAgent
              basePrompt += `Act as a peer reviewer. Critically review the entire research project based on this log and provide constructive feedback. Your persona is: ${settings.reviewerPersona || 'Harsh Critic'}. \n\nFULL PROJECT LOG:\n${context.full_project_summary_log}`;
              break;
         case 10:
@@ -432,7 +417,7 @@ Based on this, create a JSON object with a 'charts' array, defining 2-3 appropri
     const plannerResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
         contents: plannerPrompt,
         config: { responseMimeType: "application/json", responseSchema: VISUALIZATION_PLAN_SCHEMA }
-    }, (log) => updateLog('System', log));
+    });
     const plan = JSON.parse(plannerResponse.text).charts;
     updateLog('Planner', `Plan created with ${plan.length} visualizations.`);
 
@@ -454,7 +439,7 @@ Respond with ONLY the raw Chart.js JSON object.`;
         const builderResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
             contents: builderPrompt,
             config: { responseMimeType: "application/json", responseSchema: CHART_JS_SCHEMA }
-        }, (log) => updateLog('System', log));
+        });
         const chartJsConfig = builderResponse.text;
         updateLog('Dataset-Builder', `Chart.js JSON created for "${chartPlan.title}".`);
 
@@ -468,7 +453,7 @@ ${chartJsConfig}`;
         const plotterResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash-image', {
             contents: { parts: [{ text: plotterPrompt }] },
             config: { responseModalities: [Modality.IMAGE] }
-        }, (log) => updateLog('System', log));
+        });
         
         const imagePart = plotterResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
         if (!imagePart) {
@@ -489,93 +474,13 @@ ${chartJsConfig}`;
 - Visualizations Created:
 ${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.explanation}`).join('\n')}
 `;
-    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt }, (log) => updateLog('System', log));
+    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt });
     const summary = summaryResponse.text;
 
     const finalOutput = JSON.stringify({ summary, charts: generatedCharts });
     const logSummary = `Generated ${generatedCharts.length} charts and a summary based on the analysis plan.`;
 
     return { finalOutput, logSummary };
-};
-
-
-/**
- * Agentic workflow for Step 9: Peer Review Simulation.
- * This function iterates through steps 1-8, reviewing each one individually to avoid large context windows.
- */
-export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
-    let finalReviewDocument = `# Peer Review Simulation\n\nThis review was conducted step-by-step to provide focused feedback.\n\n`;
-    
-    // Get overarching context once
-    let researchQuestion = 'N/A';
-    try {
-        const step1Output = experiment.stepData[1]?.output;
-        if (step1Output) {
-            const step1Data = JSON.parse(step1Output.replace(/```json/g, '').replace(/```/g, '').trim());
-            researchQuestion = step1Data.research_question || 'Could not parse research question from Step 1 JSON.';
-        }
-    } catch {
-        researchQuestion = experiment.stepData[1]?.output || 'Could not parse research question.';
-    }
-
-    const hypothesis = experiment.stepData[3]?.output || 'N/A';
-
-    for (let i = 1; i <= 8; i++) {
-        const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
-        if (!stepInfo) continue;
-        
-        let stepOutput = experiment.stepData[i]?.output;
-        let reviewNote = '';
-
-        if (!stepOutput || stepOutput.trim() === '') {
-            finalReviewDocument += `## Step ${i}: ${stepInfo.title}\n\n*   No output was found for this step. Review skipped.\n\n`;
-            continue;
-        }
-
-        // Truncation/summarization logic to prevent 400 errors from oversized prompts.
-        const MAX_CHARS = 20000;
-        if (stepOutput.length > MAX_CHARS) {
-            stepOutput = experiment.stepData[i]?.summary || stepOutput.substring(0, MAX_CHARS) + "... (truncated)";
-            reviewNote = ' (Note: This review is based on a summary or truncated version of the step due to its length.)';
-        }
-
-        updateLog('Reviewer', `Analyzing Step ${i}: ${stepInfo.title}...`);
-        
-        const fineTuneSettings = experiment.fineTuneSettings[9] || {};
-        const persona = fineTuneSettings.reviewerPersona || 'Harsh Critic';
-        const systemInstruction = `You are an expert AI research assistant acting as a '${persona}' peer reviewer. Your task is to review a specific step of a research project.`;
-
-        const reviewPrompt = `
-Overall Research Context:
-- Research Question: ${researchQuestion}
-- Hypothesis: ${hypothesis}
-
-You are currently reviewing:
-- Step: "${stepInfo.title}"${reviewNote}
-- Content of the step:
----
-${stepOutput}
----
-
-Based on this content, provide 1 to 4 concise, constructive recommendations or critiques for this specific step. Focus only on the content provided. Format your response as a bulleted list in Markdown.`;
-
-        const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { 
-            contents: reviewPrompt,
-            config: { systemInstruction } 
-        }, (log) => updateLog('System', log));
-        
-        finalReviewDocument += `## Step ${i}: ${stepInfo.title}\n\n${response.text}\n\n`;
-
-        updateLog('Reviewer', `Finished reviewing Step ${i}.`);
-        
-        // Add a delay to avoid rate limiting
-        if (i < 8) {
-            await new Promise(resolve => setTimeout(resolve, 4000));
-        }
-    }
-
-    updateLog('System', 'Full peer review complete.');
-    return finalReviewDocument;
 };
 
 
@@ -589,7 +494,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     // Agent 1: Manager (Outliner)
     updateLog('Manager', 'Analyzing project log to create a publication outline...');
     const outlinePrompt = `You are a scientific editor. Based on the provided research log, create a standard publication outline as a JSON array of strings (e.g., ["Abstract", "Introduction", "Methodology", "Results", "Discussion", "Conclusion", "References"]). Research Log:\n\n${fullContext}`;
-    const outlineResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: outlinePrompt }, (log) => updateLog('System', log));
+    const outlineResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: outlinePrompt });
     const outline = JSON.parse(outlineResponse.text.replace(/```json/g, '').replace(/```/g, ''));
     updateLog('Manager', 'Outline created: ' + outline.join(', '));
     await new Promise(resolve => setTimeout(resolve, 2000));

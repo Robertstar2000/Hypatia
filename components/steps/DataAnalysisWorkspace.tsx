@@ -1,13 +1,7 @@
-
-
-
-
-
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
-import { runDataAnalysisAgent } from '../../services';
+import { runDataAnalysisAgent, parseGeminiError } from '../../services';
 import { GeneratedOutput } from '../common/GeneratedOutput';
 import { AgenticAnalysisView } from '../common/AgenticAnalysisView';
 
@@ -40,19 +34,28 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
             });
         };
         
-        // This is now much simpler. We don't need a complex try/catch here because
-        // runDataAnalysisAgent is guaranteed to resolve successfully with a valid output.
-        const { finalOutput, logSummary } = await runDataAnalysisAgent({
-            experiment: activeExperiment,
-            csvData: stepData.input,
-            gemini,
-            updateLog: logCallback,
-        });
+        try {
+            const { finalOutput, logSummary } = await runDataAnalysisAgent({
+                experiment: activeExperiment,
+                csvData: stepData.input,
+                gemini,
+                updateLog: logCallback,
+            });
 
-        const finalStepData = { ...stepData, output: finalOutput, suggestedInput: logSummary };
-        await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
-        setAgenticRun(prev => ({ ...prev, status: 'success' }));
-        addToast("Analysis complete!", "success");
+            const finalStepData = { ...stepData, output: finalOutput, suggestedInput: logSummary };
+            await updateExperiment({ ...activeExperiment, stepData: { ...activeExperiment.stepData, 7: finalStepData } });
+            setAgenticRun(prev => ({ ...prev, status: 'success' }));
+            addToast("Analysis complete!", "success");
+        } catch (error) {
+            console.error("Agentic data analysis failed:", error);
+            const errorMessage = parseGeminiError(error, "An unknown error occurred during analysis.");
+            addToast(errorMessage, "danger");
+            setAgenticRun(prev => ({ 
+                ...prev, 
+                status: 'failed',
+                logs: [...prev.logs, { agent: 'System', message: `ERROR: ${errorMessage}` }]
+            }));
+        }
 
     }, [activeExperiment, gemini, addToast, updateExperiment, stepData]);
     
@@ -65,6 +68,21 @@ export const DataAnalysisWorkspace = ({ onStepComplete }) => {
     if (agenticRun.status === 'running') {
         return <AgenticAnalysisView agenticRun={agenticRun} />;
     }
+
+    // If failed, show the logs and a retry button to give the user context and a path forward.
+    if (agenticRun.status === 'failed' && agenticRun.logs.length > 0) {
+        return (
+            <div>
+                 <AgenticAnalysisView agenticRun={agenticRun} />
+                 <div className="text-center mt-3">
+                    <button className="btn btn-primary" onClick={performAgenticAnalysis}>
+                        <i className="bi bi-arrow-clockwise me-1"></i> Retry Analysis
+                    </button>
+                 </div>
+            </div>
+        );
+    }
+
 
     return (
         <div>

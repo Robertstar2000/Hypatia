@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { Experiment } from '../../config';
 
@@ -24,11 +25,18 @@ export const ExperimentCard: React.FC<{
                     <div className="progress-bar" style={{ width: `${exp.currentStep * 10}%` }}></div>
                 </div>
                 {isArchived ? (
-                    <div className="d-flex justify-content-between">
-                        <button className="btn btn-sm btn-outline-light" onClick={() => onUnarchive(exp)}>
-                             <i className="bi bi-box-arrow-in-up me-1"></i> Unarchive
-                        </button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(exp.id)}><i className="bi bi-trash"></i></button>
+                    <div className="btn-toolbar justify-content-between">
+                        <div className="btn-group me-2" role="group">
+                             <button className="btn btn-sm btn-outline-light" onClick={() => selectExperiment(exp.id)}>
+                                <i className="bi bi-eye me-1"></i> View
+                            </button>
+                            <button className="btn btn-sm btn-outline-light" onClick={() => onUnarchive(exp)}>
+                                 <i className="bi bi-box-arrow-in-up me-1"></i> Unarchive
+                            </button>
+                        </div>
+                        <div className="btn-group" role="group">
+                             <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(exp.id)}><i className="bi bi-trash"></i> Delete</button>
+                        </div>
                     </div>
                 ) : (
                     <>

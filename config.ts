@@ -274,6 +274,7 @@ export const VISUALIZATION_PLAN_SCHEMA = {
 /**
  * @const CHART_JS_SCHEMA
  * A strict schema for a single Chart.js configuration object. Used by the "Doer" agent in Step 7.
+ * This schema has been updated to be compliant with the Gemini API's strict schema validation rules.
  */
 export const CHART_JS_SCHEMA = {
     type: Type.OBJECT,
@@ -298,7 +299,15 @@ export const CHART_JS_SCHEMA = {
                             label: { type: Type.STRING },
                             data: {
                                 type: Type.ARRAY,
-                                description: "The array of data points. For 'bar'/'line', an array of numbers. For 'scatter', an array of objects like {x: number, y: number}."
+                                description: "The array of data points as objects. For scatter plots, use {x: number, y: number}. For bar/line charts, where the top-level 'labels' array provides the x-axis, use objects like {y: number}.",
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        x: { type: Type.NUMBER },
+                                        y: { type: Type.NUMBER }
+                                    },
+                                    required: ["y"]
+                                }
                             },
                         },
                         required: ["label", "data"]
@@ -306,10 +315,6 @@ export const CHART_JS_SCHEMA = {
                 }
             },
             required: ["datasets"]
-        },
-        options: {
-            type: Type.OBJECT,
-            description: "Optional Chart.js options object.",
         }
     },
     required: ["type", "data"]

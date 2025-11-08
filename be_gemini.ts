@@ -1,5 +1,6 @@
 
-import { GoogleGenAI } from "@google/genai";
+
+import { GoogleGenAI, Type } from "@google/genai";
 import {
     Experiment,
     FineTuneSettings,
@@ -591,7 +592,19 @@ Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", 
         updateLog('Researcher', `All search results collected.`);
 
         // 3. Synthesizer: Create the final JSON output
-        const synthesizerPrompt = `You are a Synthesizer agent. Based on the following research results, you must synthesize the results into a cohesive literature review summary and structured reference list, appropriate for the field of ${context.experimentField}. Your output MUST be a single, valid JSON object that conforms to the schema. It must contain 'summary' and 'references' keys. The 'references' array must contain objects with 'title', 'authors', 'year', 'journal', and 'url'. Previous attempt failed with this feedback: "${lastFeedback}".\n\nSearch Results:\n${searchResults}`;
+        const synthesizerPrompt = `You are an expert Synthesizer agent for scientific literature in the field of ${context.experimentField}.
+Your input is a raw collection of search results. Your task is to process this text and produce a single, valid JSON object that conforms to the required schema.
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Write the Summary:** First, read all the search results and write a cohesive, well-structured literature review summary in Markdown format. This summary should synthesize the key findings from the provided text.
+2.  **Extract References:** Second, meticulously extract structured reference objects from the text.
+3.  **STRICTLY ENFORCE QUALITY:** You MUST discard any source where the author information is missing, is "N/A", or appears to be a generic placeholder like "Unknown". A shorter list of high-quality, fully attributed references is STRONGLY preferred over a longer, incomplete list. Do not invent authors. If a source is good but has no author, do not include it in the reference list, but you may still mention its findings in the summary.
+4.  **Schema Conformance:** Your final output must be ONLY a single JSON object with two keys: "summary" (string) and "references" (an array of reference objects).
+
+**Previous attempt failed with this feedback:** "${lastFeedback}"
+
+**Raw Search Results to Process:**
+${searchResults}`;
         const synthesizerResponse = await callAgent('gemini-2.5-flash', {
             contents: synthesizerPrompt,
             config: {

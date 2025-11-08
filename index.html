@@ -618,6 +618,25 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+        /* --- NEW STYLES FOR COMPLETION VIEW --- */
+        .completion-view-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100%; /* Fill the parent card-body */
+        }
+        .completion-view-wrapper > .tab-content {
+            flex-grow: 1; /* Take up remaining space */
+            overflow-y: auto; /* Enable scrolling */
+            border-top: none;
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            min-height: 0; /* Necessary for flexbox scrolling */
+        }
+        .completion-view-wrapper > .text-center,
+        .completion-view-wrapper > .card.mb-4,
+        .completion-view-wrapper > .nav-tabs {
+            flex-shrink: 0;
+        }
     </style>
 <script type="importmap">
 {

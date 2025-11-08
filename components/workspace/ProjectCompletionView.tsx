@@ -225,7 +225,7 @@ export const ProjectCompletionView = () => {
     };
 
     return (
-        <div className="p-3">
+        <div className="p-3 completion-view-wrapper">
             <div className="text-center mb-4">
                 <i className="bi bi-award-fill" style={{fontSize: '3rem', color: 'var(--primary-glow)'}}></i>
                 <h3 className="mt-3">Research Project Complete</h3>

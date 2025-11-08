@@ -17,6 +17,47 @@ import {
 // --- GEMINI API SERVICE ---
 
 /**
+ * Parses the server-suggested retry delay from a Gemini API error object.
+ * The function handles cases where the error details are directly available
+ * or nested within a JSON string in the error message.
+ * @param error The error object from a Gemini API call.
+ * @returns The delay in milliseconds, or null if not found.
+ */
+const getRetryDelay = (error: any): number | null => {
+    let details;
+    // Standard path for error details
+    if (error?.error?.details) {
+        details = error.error.details;
+    } 
+    // Fallback for cases where the details are nested inside a JSON string in the message
+    else if (error?.error?.message && typeof error.error.message === 'string') {
+        try {
+            const nestedError = JSON.parse(error.error.message);
+            if (nestedError?.error?.details) {
+                details = nestedError.error.details;
+            }
+        } catch (e) {
+            // Not a JSON string or malformed, so we can't parse it.
+        }
+    }
+
+    if (details) {
+        const retryInfo = details.find(
+            (detail: any) => detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo'
+        );
+        if (retryInfo?.retryDelay) {
+            const delayString = retryInfo.retryDelay; // e.g., "45s" or "45.123s"
+            const seconds = parseFloat(delayString);
+            if (!isNaN(seconds)) {
+                // Add a small buffer to be safe
+                return (seconds * 1000) + 500;
+            }
+        }
+    }
+    return null;
+};
+
+/**
  * Wraps any promise with a timeout.
  * @param geminiCall The promise to execute (e.g., a Gemini API call).
  * @param timeout The timeout in milliseconds.
@@ -34,6 +75,7 @@ const callGeminiWithTimeout = async (geminiCall: Promise<any>, timeout: number =
 
 /**
  * A robust wrapper for Gemini API calls that includes exponential backoff for rate limiting and timeout errors.
+ * It now respects the `retry-after` delay provided by the server in 429 errors.
  * @param gemini - The initialized GoogleGenAI instance.
  * @param model - The model name to use.
  * @param params - The parameters for the generateContent call.
@@ -51,7 +93,7 @@ export const callGeminiWithRetry = async (
     timeout: number = 60000
 ) => {
     let attempt = 0;
-    let delay = 2000; // Start with a 2-second delay
+    let delay = 2000; // Start with a 2-second delay for exponential backoff
     while (attempt < maxRetries) {
         try {
             const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }), timeout);
@@ -64,10 +106,20 @@ export const callGeminiWithRetry = async (
             if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
                 const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
-                const logMessage = `Call ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+
+                // Prioritize server-suggested delay, otherwise use exponential backoff
+                const serverDelay = getRetryDelay(error);
+                const retryAfterMs = serverDelay ?? delay;
+                
+                const logMessage = `Call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2; // Exponential backoff
+                
+                await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+                
+                // Only increase our own backoff delay if we're not using the server's
+                if (serverDelay === null) {
+                    delay *= 2; 
+                }
             } else {
                 throw error; // Rethrow for other errors or if max retries are reached
             }
@@ -77,7 +129,8 @@ export const callGeminiWithRetry = async (
 };
 
 /**
- * A robust wrapper for Gemini API streaming calls that includes exponential backoff and timeouts.
+ * A robust wrapper for Gemini API streaming calls that includes exponential backoff, timeouts,
+ * and respects server-provided `retry-after` delays.
  */
 export const callGeminiStreamWithRetry = async (
     gemini: GoogleGenAI,
@@ -100,10 +153,20 @@ export const callGeminiStreamWithRetry = async (
             if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
                 attempt++;
                 const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
-                const logMessage = `Streaming call ${reason}. Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+
+                // Prioritize server-suggested delay, otherwise use exponential backoff
+                const serverDelay = getRetryDelay(error);
+                const retryAfterMs = serverDelay ?? delay;
+                
+                const logMessage = `Streaming call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2;
+                
+                await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+                
+                // Only increase our own backoff delay if we're not using the server's
+                if (serverDelay === null) {
+                    delay *= 2;
+                }
             } else {
                 throw error;
             }

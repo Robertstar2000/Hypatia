@@ -43,6 +43,12 @@ export const Dashboard = ({ setView }) => {
         setSelectedExperiment(experiment);
         setShowDeployModal(true);
     };
+    
+    const handleArchive = async (exp: Experiment) => {
+        if (window.confirm("Are you sure you want to archive this project? It will be moved to a separate section.")) {
+            await updateExperiment({ ...exp, status: 'archived' });
+        }
+    };
 
     const handleUnarchive = async (exp: Experiment) => {
         await updateExperiment({ ...exp, status: 'active' });
@@ -71,7 +77,7 @@ export const Dashboard = ({ setView }) => {
             )}
             
             {activeExperiments.length > 0 && <div className="row">
-                {activeExperiments.map(exp => <ExperimentCard key={exp.id} exp={exp} onUnarchive={handleUnarchive} deleteExperiment={deleteExperiment} selectExperiment={selectExperiment} handleDeployClick={handleDeployClick} handleExport={handleExport} />)}
+                {activeExperiments.map(exp => <ExperimentCard key={exp.id} exp={exp} onArchive={handleArchive} onUnarchive={handleUnarchive} deleteExperiment={deleteExperiment} selectExperiment={selectExperiment} handleDeployClick={handleDeployClick} handleExport={handleExport} />)}
             </div>}
             
             {archivedExperiments.length > 0 && (
@@ -79,7 +85,7 @@ export const Dashboard = ({ setView }) => {
                     <hr className="my-5" />
                     <h3 className="section-title mb-4">Archived Projects</h3>
                     <div className="row">
-                        {archivedExperiments.map(exp => <ExperimentCard key={exp.id} exp={exp} isArchived={true} onUnarchive={handleUnarchive} deleteExperiment={deleteExperiment} selectExperiment={selectExperiment} handleDeployClick={handleDeployClick} handleExport={handleExport} />)}
+                        {archivedExperiments.map(exp => <ExperimentCard key={exp.id} exp={exp} isArchived={true} onArchive={handleArchive} onUnarchive={handleUnarchive} deleteExperiment={deleteExperiment} selectExperiment={selectExperiment} handleDeployClick={handleDeployClick} handleExport={handleExport} />)}
                     </div>
                 </>
             )}

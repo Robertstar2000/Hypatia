@@ -1,16 +1,19 @@
 
 
-import { GoogleGenAI, Type } from "@google/genai";
+
+
+
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
     FineTuneSettings,
     STEP_SPECIFIC_TUNING_PARAMETERS,
-    DATA_ANALYZER_SCHEMA,
+    DATA_ANALYSIS_IMAGE_OUTPUT_SCHEMA,
     LITERATURE_REVIEW_SCHEMA,
     RESEARCH_QUESTION_SCHEMA,
     WORKFLOW_STEPS,
     CHART_JS_SCHEMA,
-    ANALYSIS_PLAN_SCHEMA,
+    VISUALIZATION_PLAN_SCHEMA,
 } from './config';
 
 
@@ -125,28 +128,23 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
         const errorCode = error.error.code;
         const errorMessage = error.error.message;
 
-        // Handle specific server-side 500 errors with a more user-friendly message
-        if (errorCode === 500 || errorMessage.includes('Internal error')) {
-            return 'The AI model encountered an internal error. This is usually a temporary issue. Please try again in a few moments.';
+        // Handle specific server-side 500 errors
+        if (errorCode === 500) {
+            return `A server error occurred on the AI's side (Code: 500). Please try again later. Details: ${errorMessage}`;
         }
-        return errorMessage; // Return other specific messages from the API
+        return `An API error occurred (Code: ${errorCode}): ${errorMessage}`;
     }
-    
-    // Fallback to checking string content for other types of errors (e.g., from the client library)
-    const message = error?.message || '';
-    if (message.includes('API key not valid')) {
-        return 'API Key is not valid. Please check your key and try again.';
+
+    if (error?.message) {
+        if (error.message.includes('API key not valid')) {
+            return "Authentication failed: The provided API Key is not valid. Please check the key and try again.";
+        }
+        if (error.message.toLowerCase().includes('timed out')) {
+            return "The request to the AI service timed out. Please check your network connection and try again.";
+        }
+        return error.message;
     }
-    if (message.includes('429') || message.toLowerCase().includes('too many requests')) {
-        return 'You have made too many requests in a short period. Please wait a moment and try again.';
-    }
-    if (message.includes('503')) { // Service Unavailable or internal server error from client library
-        return 'The AI service is temporarily unavailable or experiencing issues. Please try again later.';
-    }
-    if (message.includes('fetch failed') || message.includes('NetworkError')) {
-        return 'A network error occurred. Please check your internet connection.';
-    }
-    
+
     return fallbackMessage;
 };
 
@@ -154,11 +152,8 @@ export const parseGeminiError = (error: any, fallbackMessage: string = "An unkno
 export const testApiKey = async (apiKey: string): Promise<boolean> => {
     if (!apiKey) return false;
     try {
-        const testGemini = new GoogleGenAI({ apiKey });
-        await callGeminiWithRetry(testGemini, 'gemini-2.5-flash', {
-             contents: 'test',
-             config: { thinkingConfig: { thinkingBudget: 0 } }
-        }, undefined, 2);
+        const ai = new GoogleGenAI({ apiKey });
+        await ai.models.generateContent({model: 'gemini-2.5-flash', contents: 'test'});
         return true;
     } catch (error) {
         console.error("API Key validation failed:", error);
@@ -166,561 +161,291 @@ export const testApiKey = async (apiKey: string): Promise<boolean> => {
     }
 };
 
-
+/**
+ * Gathers context from previous steps for the current step's prompt.
+ * Uses concise summaries for older steps to save tokens.
+ * @param experiment The full experiment object.
+ * @param stepId The ID of the step to get context FOR.
+ * @returns A context object.
+ */
+// Fix: Changed the return type from `object` to `any` to allow accessing dynamically added properties without causing TypeScript errors.
 export const getStepContext = (experiment: Experiment, stepId: number): any => {
     const context: any = { experimentField: experiment.field };
     const data = experiment.stepData || {};
 
-    const getStepSummary = (sId) => data[sId]?.summary || data[sId]?.output || 'N/A';
-    const getFullOutput = (sId) => data[sId]?.output || 'N/A';
+    // Helper to get summary, falling back to full output if summary is missing
+    const getStepSummary = (sId: number) => data[sId]?.summary || data[sId]?.output || 'N/A';
+    // Helper to get the full, raw output of a step
+    const getFullOutput = (sId: number) => data[sId]?.output || 'N/A';
 
-    // Build context using summaries for efficiency
-    if (stepId > 1) context.question = getFullOutput(1); // The question should always be in full
+    // Build context object with relevant data from previous steps
+    if (stepId > 1) context.question = getFullOutput(1);
     if (stepId > 2) context.literature_review_summary = getStepSummary(2);
-    if (stepId > 3) context.hypothesis = getFullOutput(3); // Hypothesis is usually short, keep full
+    if (stepId > 3) context.hypothesis = getFullOutput(3);
     if (stepId > 4) context.methodology_summary = getStepSummary(4);
     if (stepId > 5) context.data_collection_plan_summary = getStepSummary(5);
-    if (stepId > 6) context.experiment_data_csv = data[6]?.input?.slice(0, 2000); // Send a preview of the data
+    if (stepId > 6) context.experimental_data_summary = getStepSummary(6);
     if (stepId > 7) context.analysis_summary = getStepSummary(7);
     if (stepId > 8) context.conclusion_summary = getStepSummary(8);
-
-
-    // For the final steps (9, 10, and new deploy actions), create a concise log using summaries
-    if (stepId >= 9) {
+    if (stepId > 9) context.peer_review_summary = getStepSummary(9);
+    
+    // For steps that need a full project log (like Peer Review and Publication),
+    // compile a log. Use full output for recent steps and summaries for older ones.
+    if (stepId === 9 || stepId === 10 || stepId === 13) { // Added step 13 for explanation generation
         let projectLog = '';
-        for (let i = 1; i < Math.min(stepId, 10); i++) { // Only loop through the 10 main steps
+        for (let i = 1; i < stepId; i++) {
             const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
             if (stepInfo) {
-                // Use full output for Step 2 (Lit Review for references) and other recent steps, BUT NOT for step 7.
-                // For Step 7, the summary is always more useful in a text log than the full JSON.
-                let output = (i !== 7 && (i === 2 || stepId - i <= 2)) ? getFullOutput(i) : getStepSummary(i);
-                
-                if (i === 7 && data[7]?.output) {
-                     // For step 7, we already have the summary, just add the note.
-                     output += "\n[Note: Data visualizations were generated during this step.]";
-                }
+                // Use full output for the two most recent steps, summaries for the rest
+                const output = (stepId - i <= 2) ? getFullOutput(i) : getStepSummary(i);
                 projectLog += `--- Summary of Step ${i}: ${stepInfo.title} ---\n${output}\n\n`;
             }
         }
-        context.full_project_summary_log = projectLog;
-    }
-    
-    // For presentation generation and explanation, we need the final draft specifically
-    if (stepId === 12 || stepId === 13) {
-        context.publication_draft = getFullOutput(10);
+        context.full_project_summary_log = projectLog.trim();
     }
 
     return context;
 };
 
-
-export const getPromptForInputSuggestion = (stepId: number, context: any) => {
-    const systemInstruction = `You are an AI research assistant. Your task is to propose a concise, well-formed input for the user for the upcoming step in their research project. The user will be able to edit this, so make it a strong starting point.`;
-    const config = { systemInstruction };
-    let basePrompt = "";
-
-    switch (stepId) {
-        case 1:
-            basePrompt = `The user has started a new experiment in the field of ${context.experimentField}. Propose an initial research idea or topic for them to refine. For example: 'My research idea is to investigate the effects of plastic pollution on marine life.'`;
-            break;
-        case 3:
-            basePrompt = `Based on the research question "${context.question}" and the literature review, propose a primary, testable hypothesis.`;
-            break;
-        case 4:
-            basePrompt = `The current hypothesis is "${context.hypothesis}". Propose a suitable title or brief description for the methodology that will be designed to test it.`;
-            break;
-        case 7:
-            basePrompt = null;
-            break;
-        default:
-            basePrompt = null;
-    }
-    return { basePrompt, config };
-};
-
-
-export const getPromptForStep = (stepId: number, userInput: string, context: any, fineTuneSettings: FineTuneSettings, regenerationFeedback: string = '') => {
-    let systemInstruction = `You are an expert AI research assistant specializing in ${context.experimentField || 'General Science'}. Your goal is to guide a user through the scientific method.`;
+/**
+ * Constructs the prompt and configuration for a given step.
+ * @param stepId The ID of the step.
+ * @param userInput The direct user input for the step (if any).
+ * @param context The context object from getStepContext.
+ * @param fineTuneSettings The fine-tuning settings for the step.
+ * @param regenerateFeedback Optional feedback for regeneration.
+ * @returns An object with the base prompt, whether to expect JSON, and the Gemini config.
+ */
+export const getPromptForStep = (
+    stepId: number, 
+    userInput: string, 
+    context: any, 
+    fineTuneSettings: FineTuneSettings,
+    regenerateFeedback: string = ''
+) => {
+    let systemInstruction = `You are an expert AI research assistant specializing in ${context.experimentField || 'General Science'}. You are a helpful, creative, and brilliant research assistant.`;
     const settings = fineTuneSettings || {};
     const params = STEP_SPECIFIC_TUNING_PARAMETERS[stepId] || [];
-    const instructions = [];
 
     params.forEach(param => {
         const value = settings[param.name] ?? param.default;
-        if (value === undefined) return;
-        if (param.name === 'reviewerPersona') {
+        if (value && param.name === 'reviewerPersona') {
             systemInstruction += ` You must adopt the persona of a '${value}' peer reviewer.`;
-        } else {
-            instructions.push(`For the parameter '${param.label}', the value must be '${value}'.`);
         }
     });
 
-    if (instructions.length > 0) {
-        systemInstruction += ` Strictly adhere to the following tuning parameters: ${instructions.join(' ')}.`;
-    }
-
     let basePrompt = "";
     let expectJson = false;
-    const config: any = { systemInstruction, };
-    
+    const config: any = { systemInstruction };
     if (settings.temperature) config.temperature = settings.temperature;
-    if (settings.topP) config.topP = settings.topP;
-    if (settings.topK) config.topK = settings.topK;
 
-    if(regenerationFeedback) {
-        basePrompt += `The user was not satisfied with the previous response. They have provided the following feedback: "${regenerationFeedback}". Please generate a new response that incorporates this feedback.\n\n---\n\nOriginal prompt follows:\n`;
+    if (regenerateFeedback) {
+        basePrompt += `Please regenerate the response. The user provided the following feedback: "${regenerateFeedback}". Please incorporate this feedback to improve the result.\n\n`;
     }
 
     switch (stepId) {
         case 1:
             expectJson = true;
-            basePrompt += `The user's initial idea is: "${userInput}". Your tasks are to:
-1. Formulate a clear, focused, and testable research question from this idea in the field of ${context.experimentField}.
-2. Provide a 'uniqueness_score' from 0.0 to 1.0 and a 'justification'.
-
-To determine the 'uniqueness_score', you MUST assess the density of existing, published information on the topic within your vast knowledge base. The score is inversely proportional to the amount of information available:
-- If you find a VAST amount of information (the topic is foundational or extensively studied, like 'the effects of gravity'), the score must be very low, around 0.05.
-- If you find essentially NO information (the idea is completely novel or a new intersection of fields), the score must be 1.0.
-- If you find LITTLE information (the topic is niche, emerging, or has few studies), the score should be high (e.g., 0.8 or above).
-- Use the full range between 0.05 and 1.0 to represent the spectrum of information density.
-
-Your justification MUST briefly explain your reasoning for the score by referencing the density and type of information you found (or didn't find).
-
-Your final output must be ONLY a single, raw JSON object that conforms to the required schema.`;
+            basePrompt += `Refine the following research idea into a clear, focused, and testable research question. Also, provide a uniqueness score (0.0 to 1.0) and a brief justification. Idea: ${userInput}`;
             config.responseMimeType = "application/json";
             config.responseSchema = RESEARCH_QUESTION_SCHEMA;
             break;
         case 2:
-            // This step is now handled by the runLiteratureReviewAgent workflow.
-            // This prompt is a fallback in case it's called directly, but it shouldn't be.
-            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool.`;
+            // This case is now handled by the dedicated runLiteratureReviewAgent
+            basePrompt += `For the research question "${context.question}", conduct a literature review. Find relevant, recent, and authoritative sources. Provide a comprehensive summary and a list of structured references.`;
             config.tools = [{ googleSearch: {} }];
             break;
         case 3:
-            basePrompt += `Based on the research question: "${context.question}" and this literature review summary: "${context.literature_review_summary}", generate several distinct, testable hypotheses for the field of ${context.experimentField}. Present them clearly. The user's initial thought is: "${userInput}"`;
+            basePrompt += `Based on the literature review summary: "${context.literature_review_summary}", formulate ${settings.hypothesis_count || 3} distinct hypotheses for the research question: "${context.question}"`;
             break;
         case 4:
-            basePrompt += `The chosen hypothesis is: "${context.hypothesis}". The user has provided the following input: "${userInput}". Design a detailed, step-by-step methodology to test this hypothesis, appropriate for the field of ${context.experimentField}.`;
+            basePrompt += `Design a detailed methodology to test the hypothesis: "${context.hypothesis}". The methodology should be ${settings.detail_level || 'a detailed protocol'}.`;
             break;
         case 5:
-            basePrompt += `Based on the designed methodology summary: "${context.methodology_summary}", create a detailed data collection plan appropriate for ${context.experimentField}. Specify variables, measurement techniques, and data recording format.`;
+            basePrompt += `Create a data collection plan for the methodology: "${context.methodology_summary}".`;
             break;
-        case 6: // Synthesize Data
-            basePrompt += `The user has chosen to synthesize data. Based on the methodology summary: "${context.methodology_summary}" and data plan summary: "${context.data_collection_plan_summary}", generate a plausible, estimated, synthetic dataset in CSV format that could have resulted from this experiment. This simulation should be realistic for an experiment in ${context.experimentField}. Output ONLY the CSV data and a brief, one-sentence summary of what the data represents. Separate the summary and the CSV data with '---'. For example: 'This data shows a positive correlation.\\n---\\nheader1,header2\\n1,2'`;
+        case 6: // AI Data Synthesis
+            basePrompt += `Based on the methodology summary: "${context.methodology_summary}" and data plan summary: "${context.data_collection_plan_summary}", generate a plausible, estimated, synthetic dataset in CSV format. Output ONLY the CSV data and a brief, one-sentence summary of what the data represents. Separate the summary and the CSV data with '---'.`;
             break;
-        case 7: // Data Analyzer
-            expectJson = true;
-            config.responseMimeType = "application/json";
-            config.responseSchema = DATA_ANALYZER_SCHEMA;
-            // The prompt is simplified because the main logic for both manual and auto modes
-            // is now handled by dedicated agentic workflows, not this generic function.
-            // This prompt serves as a basic fallback.
-            basePrompt += `Analyze the following CSV data: \n\`\`\`\n${userInput}\n\`\`\`\nProvide a summary and suggest relevant charts. Your output MUST be a valid JSON object matching the schema.`;
+        case 7:
+            // This case is now handled by the dedicated runDataAnalysisAgent
+            basePrompt += `Analyze the following data: ${userInput}`;
             break;
         case 8:
-            basePrompt += `You are tasked with drawing a conclusion for a scientific experiment in ${context.experimentField}. Use the following information:\n\n- **Research Question:** "${context.question}"\n- **Data Analysis Summary:** "${context.analysis_summary}"\n- **User's Additional Notes:** "${userInput}"\n\nBased ONLY on the information provided, write a formal conclusion. Your conclusion must directly address the final research question. It must explicitly state whether the hypothesis ("${context.hypothesis}") was supported, rejected, or if the results were inconclusive. You must also discuss the broader implications of the findings and acknowledge potential limitations of the study.`;
+            basePrompt += `Based on the data analysis summary: "${context.analysis_summary}", draw conclusions for the research project. Was the hypothesis "${context.hypothesis}" supported?`;
             break;
         case 9:
-            basePrompt += `You are a peer reviewer. Your task is to conduct a thorough and constructive review of the entire research project, which is in the field of ${context.experimentField}. Analyze the project for clarity, scientific rigor, logical consistency between steps, and the strength of the final conclusion.\n\nHere is the summarized project log:\n\n${context.full_project_summary_log}`;
-            break;
+             basePrompt += `Act as a peer reviewer. Critically review the entire research project based on this log and provide constructive feedback. Your persona is: ${settings.reviewerPersona || 'Harsh Critic'}. \n\nFULL PROJECT LOG:\n${context.full_project_summary_log}`;
+             break;
         case 10:
-            // This step is now handled by the dedicated runPublicationAgent workflow.
-            // This prompt is a fallback in case it's called directly, but it shouldn't be.
-            basePrompt += `Assemble the project log into a publication. Log: ${context.full_project_summary_log}`;
-            break;
-        case 11: // Virtual step for Submission Checklist
-             basePrompt += `Based on the following research project summary log, generate a comprehensive pre-submission checklist for a high-impact journal in the field of ${context.experimentField}. The checklist should be in Markdown format and cover key areas like formatting, authorship, data availability statements, conflict of interest declarations, and ethical considerations.\n\nProject Log:\n${context.full_project_summary_log}`;
-            break;
-        case 12: // Virtual step for Presentation Outline
-             basePrompt += `Based on the following scientific paper from the field of ${context.experimentField}, create a concise 10-slide presentation outline in Markdown format. Each slide heading should be a level 2 header (##). The slides should be: Title, Introduction/Background, Research Question, Methods, Key Results (1-2 slides with data points), Data Visualization (Chart description), Discussion, Conclusion, Future Work, and Q&A.\n\nPaper:\n${context.publication_draft}`;
-            break;
-        case 13: // Virtual step for Plain English Explanation
-             basePrompt += `Summarize the following scientific paper in plain English, at a 12th-grade reading level. Avoid complex jargon and focus on the core research question, key findings, and their importance. Structure the explanation with clear Markdown headings (e.g., "### What Was the Goal?").\n\nPaper:\n${context.publication_draft}`;
-            break;
+             // This case is now handled by the dedicated runPublicationAgent
+             basePrompt += `Assemble the entire research project into a publication-ready paper based on this log: \n\n${context.full_project_summary_log}`;
+             break;
+        case 11: // Manual Mode Deploy: Submission Checklist
+             basePrompt += `Based on the completed research paper draft, generate a detailed "Journal Submission Checklist". This should include sections like 'Manuscript Formatting', 'Figure & Table Preparation', 'Author Contributions', 'Conflict of Interest Statement', and 'Cover Letter Key Points'. The research is in the field of ${context.experimentField}.`;
+             break;
+        case 12: // Automated Mode Deploy: Presentation Outline
+             basePrompt += `Based on the completed research paper draft, generate a 10-slide presentation outline. For each slide, provide a title, key bullet points, and a suggestion for a visual aid. The research is in the field of ${context.experimentField}.`;
+             break;
+        case 13: // Completion View: Explain this Paper
+             basePrompt += `You are an expert science communicator. Explain the following research paper in plain English, suitable for a 12th-grade reading level. Minimize jargon and focus on the key findings and their importance. \n\n---\n\n${context.full_project_summary_log}`;
+             break;
         default:
-            basePrompt += `An unknown step was requested. Please provide general assistance.`;
+            basePrompt += `For step ${stepId}, with input "${userInput}", using context: ${JSON.stringify(context)}.`;
     }
 
     return { basePrompt, expectJson, config };
 };
 
 /**
- * Executes a multi-agent workflow to generate a complete scientific paper.
- * @param {object} params - The parameters for the agent.
- * @param {Experiment} params.experiment - The active experiment object.
- * @param {GoogleGenAI} params.gemini - The initialized Gemini client.
- * @param {(agent: string, message: string) => void} params.updateLog - Callback to send log updates to the UI.
- * @returns {Promise<string>} The final, formatted publication text in Markdown.
- */
-export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
-    try {
-        // A robust, rate-limited agent caller.
-        const callAgent = async (model: string, params: any, agentName: string, timeout?: number) => {
-            updateLog(agentName, 'is thinking...');
-            const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-            const response = await callGeminiWithRetry(gemini, model, params, logCallback, 5, timeout);
-            const result = response.text;
-            updateLog(agentName, 'has completed its task.');
-            // Proactive delay to prevent rate limiting on sequential calls, but skip for the final step.
-            if (agentName.toLowerCase() !== 'editor') {
-                await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-            return result;
-        };
-        
-        // 1. Get full context and fine-tuning settings
-        const fullContextLog = getStepContext(experiment, 10).full_project_summary_log;
-        const fineTuneSettings = experiment.fineTuneSettings[10] || {};
-        const scientificField = experiment.field;
-        const referenceStyle = fineTuneSettings.referenceStyle || 'APA';
-        const pageCount = fineTuneSettings.pageCount || 'Standard (5-7 pages)';
-        
-        updateLog('System', `Project context compiled. Field: ${scientificField}. Style: ${referenceStyle}. Length: ${pageCount}.`);
-
-        // 2. Outline
-        const outlinePrompt = `Based on the project log, create a structural outline for a scientific paper in the field of ${scientificField}. Output a JSON array of strings, e.g., ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"].\n\nLog:\n${fullContextLog}`;
-        const outlineText = await callAgent('gemini-flash-lite-latest', { contents: outlinePrompt }, 'Manager');
-        let sections;
-        try {
-          sections = JSON.parse(outlineText.replace(/```json/g, '').replace(/```/g, ''));
-        } catch {
-          sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion", "References"];
-        }
-        updateLog('Manager', `Paper outline confirmed: ${sections.join(', ')}`);
-        
-        let paper = '';
-
-        // 3. Write sections
-        for (const section of sections) {
-            if (section.toLowerCase() === 'references') continue; // Handle this specifically later
-            
-            updateLog('Writer', `Drafting ${section}...`);
-            
-            let sectionPrompt;
-            if (section.toLowerCase() === "results") {
-                let analysisContext = '';
-                let chartCount = 0;
-                const analysisOutput = experiment.stepData[7]?.output;
-
-                if (analysisOutput && typeof analysisOutput === 'string' && analysisOutput.trim().startsWith('{')) {
-                    try {
-                        const analysisData = JSON.parse(analysisOutput);
-                        const detailedSummary = analysisData.summary;
-                        const charts = analysisData.chartSuggestions || [];
-                        
-                        if (!detailedSummary) throw new Error("Analysis JSON is missing the 'summary' field.");
-
-                        analysisContext = detailedSummary; // Start with the detailed summary.
-                        chartCount = charts.length;
-
-                        if (chartCount > 0) {
-                            let chartDescriptions = "\n\nThe following data visualizations were generated and must be described in the results section. You must refer to them as Figure 1, Figure 2, etc.:\n";
-                            charts.forEach((chart, index) => {
-                                const chartType = chart.type || 'N/A';
-                                const chartLabel = chart.data?.datasets?.[0]?.label || 'Untitled Chart';
-                                const dataPoints = chart.data?.datasets?.[0]?.data?.length || 0;
-                                chartDescriptions += `- Figure ${index + 1}: A '${chartType}' chart titled '${chartLabel}' that visualizes ${dataPoints} data points.\n`;
-                            });
-                            analysisContext += chartDescriptions;
-                        }
-                    } catch (e) {
-                        console.error("Could not parse analysis data for publication agent:", e);
-                        analysisContext = `[ERROR: The data analysis from Step 7 could not be read or is corrupted. Please state in the results section that the detailed analysis is unavailable due to a data processing error. The short summary of the analysis was: "${getStepContext(experiment, 8).analysis_summary}"]`;
-                        chartCount = 0;
-                    }
-                } else {
-                    analysisContext = "[ERROR: No data analysis output from Step 7 was found. Please state in the results section that the analysis is missing.]";
-                    chartCount = 0;
-                }
-                
-                sectionPrompt = `Write the "${section}" section for a paper in ${scientificField}. The paper should be a ${pageCount} document. Describe the findings based on this analysis context: "${analysisContext}". Crucially, if the context contains an error message, you must report that error clearly in this section. Otherwise, you MUST insert placeholders for all ${chartCount} charts where appropriate in the text. Use the format [CHART_1], [CHART_2], etc. The placeholder number should correspond to the Figure number in the context.`;
-            } else {
-                 sectionPrompt = `You are a scientific writer. Write the "${section}" section of a research paper in the field of ${scientificField}. The paper's target length is ${pageCount}. Here is the full project log for context. Focus on the relevant parts for this section.\n\nLog:\n${fullContextLog}`;
-            }
-            
-            const sectionText = await callAgent('gemini-flash-lite-latest', { contents: sectionPrompt }, 'Writer');
-            paper += `\n## ${section}\n\n${sectionText}\n`;
-            updateLog('Writer', `${section} section complete.`);
-        }
-
-        // 4. Generate captions and create final placeholders
-        let chartConfigs = [];
-        if (experiment.stepData[7]?.output && typeof experiment.stepData[7].output === 'string'  && experiment.stepData[7].output.trim().startsWith('{')) {
-            try {
-                const analysisData = JSON.parse(experiment.stepData[7].output);
-                chartConfigs = analysisData.chartSuggestions || [];
-            } catch (e) {
-                updateLog('System', 'Warning: Could not parse Step 7 chart data for captioning.');
-            }
-        }
-
-        if (chartConfigs.length > 0) {
-            updateLog('System', 'Generating chart captions...');
-            for (let i = 0; i < chartConfigs.length; i++) {
-                const chartConfig = chartConfigs[i] || {};
-                const chartType = chartConfig.type || 'chart';
-                const chartTitle = chartConfig.data?.datasets?.[0]?.label || 'Untitled Chart';
-                const analysisSummary = JSON.parse(experiment.stepData[7].output).summary || '';
-
-                const captionPrompt = `Write a descriptive caption for a scientific chart in the field of ${scientificField}. The caption should start with "Figure ${i + 1}:". Here is the project's analysis summary for context: "${analysisSummary}". The chart is a ${chartType} chart titled "${chartTitle}".`;
-                const caption = await callAgent('gemini-flash-lite-latest', { contents: captionPrompt }, 'Captioner');
-                const placeholderWithCaption = `\n[CHART_${i + 1}:${caption}]\n`;
-                paper = paper.replace(`[CHART_${i + 1}]`, placeholderWithCaption);
-            }
-            updateLog('System', 'Captions generated and embedded.');
-        }
-        
-        // 5. Format References
-        const litReviewOutput = experiment.stepData[2]?.output;
-        if (litReviewOutput && typeof litReviewOutput === 'string' && litReviewOutput.trim().startsWith('{')) {
-            try {
-                const parsedData = JSON.parse(litReviewOutput.replace(/```json/g, '').replace(/```/g, '').trim());
-                const refs = parsedData.references;
-                if (refs && Array.isArray(refs) && refs.length > 0) {
-                     updateLog('System', `Formatting references in ${referenceStyle} style...`);
-                    const refsPrompt = `Format the following JSON reference list into a bibliography using a scientific format similar to ${referenceStyle}. For each entry, format it as: Author, A. A., & Author, B. B. (Year). Title of work. *Journal Title*, Volume(Issue), pages. If a URL is present, include it. Output only the formatted list in Markdown, with each reference as a separate paragraph.\n\nJSON:\n${JSON.stringify(refs, null, 2)}`;
-                    const refsText = await callAgent('gemini-flash-lite-latest', { contents: refsPrompt }, 'Bibliographer');
-                    paper += `\n## References\n\n${refsText}`;
-                    updateLog('System', 'References section complete.');
-                }
-            } catch (e) {
-                updateLog('System', `Warning: Could not parse references from literature review step. Error: ${e.message}`);
-            }
-        }
-
-        // 6. Final Polish
-        updateLog('System', 'Pausing for 60 seconds to cool down before the final, large editing task to avoid rate limits.');
-        await new Promise(resolve => setTimeout(resolve, 60000)); // 60-second cool-down to reset TPM counter
-
-        updateLog('Editor', 'Performing final editorial review...');
-        const polishPrompt = `You are an efficient scientific editor. Your task is to perform a single, final pass on the following draft paper in the field of ${scientificField}.
-Your goals are to:
-1.  Add a compelling title (as a Level 1 Markdown Header: # Title).
-2.  Improve the overall flow, clarity, and grammatical correctness.
-3.  Ensure a consistent and professional tone.
-
-**CRITICAL INSTRUCTIONS**:
--   **BE EFFICIENT**: This is a language and structure polish only. Do not perform a deep scientific critique or rewrite large sections. Your goal is to refine the existing text quickly.
--   **DO NOT CHANGE MEANING**: Do not alter the scientific conclusions or the core meaning of the text.
--   **TARGET LENGTH**: The paper's target length is ${pageCount}.
-
-Output the final, polished version of the complete paper in Markdown.\n\n${paper}`;
-        const finalText = await callAgent('gemini-2.5-flash', { contents: polishPrompt }, 'Editor', 120000); // Increased 120-second timeout
-        updateLog('System', 'Publication ready.');
-        
-        return finalText;
-    } catch (error) {
-        // This top-level catch ensures that any unexpected error within the agent workflow is caught.
-        console.error("A critical error occurred within the publication agent workflow:", error);
-        updateLog('System', `FATAL ERROR: ${error.message}`);
-        // Re-throw a more informative error to be caught by the UI component.
-        throw new Error(`Publication agent failed. Internal error: ${error.message}`);
-    }
-};
-
-
-/**
- * Executes a multi-agent workflow for a literature review.
- * @param {object} params - The parameters for the agent.
- * @param {Experiment} params.experiment - The active experiment object.
- * @param {GoogleGenAI} params.gemini - The initialized Gemini client.
- * @param {(agent: string, message: string) => void} params.updateLog - Callback to send log updates to the UI.
- * @returns {Promise<string>} The final, formatted JSON output.
+ * Agentic workflow for Step 2: Literature Review.
  */
 export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }) => {
-    // A robust, rate-limited agent caller.
-    const callAgent = async (model: string, params: any, agentName: string) => {
-        updateLog(agentName, 'is thinking...');
-        const logCallback = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        const response = await callGeminiWithRetry(gemini, model, params, logCallback);
-        const result = response.text;
-        updateLog(agentName, 'has completed its task.');
-        // Proactive delay to prevent rate limiting on sequential calls.
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return result;
-    };
-
+    updateLog('System', '--- Iteration 1: Initial Search & Summary ---');
+    updateLog('Researcher', 'Conducting initial literature search using Google Search grounding.');
     const context = getStepContext(experiment, 2);
-    let lastFeedback = 'This is the first attempt.';
-    const maxIterations = 5;
+    const { basePrompt, config } = getPromptForStep(2, '', context, experiment.fineTuneSettings[2] || {});
+    config.responseMimeType = "application/json";
+    config.responseSchema = LITERATURE_REVIEW_SCHEMA;
 
-    for (let i = 0; i < maxIterations; i++) {
-        updateLog('System', `--- Iteration ${i + 1} of ${maxIterations} ---`);
-
-        // 1. Manager: Create search queries
-        const managerPrompt = `You are a Manager agent creating a search strategy for a literature review on "${context.question}" in the field of ${context.experimentField}.
-
-Your task is to generate 3 diverse search queries suitable for a standard web search engine like Google. These are NOT for a scientific database like Scopus or PubMed.
-
-**CRITICAL INSTRUCTIONS:**
-1.  **Use Natural Language:** Queries should be simple phrases or questions someone would type into Google.
-2.  **NO Complex Boolean Logic:** You MUST NOT use complex boolean operators like parenthesized (A OR B) AND (C OR D). Avoid operators like NEAR, ADJ, or complex nesting. Simple keyword combinations are fine.
-3.  **Focus on different angles:** Each query should explore a different facet of the research question.
-
-**Example of GOOD queries:**
-- "latest research on UHTC stability above 5000 K"
-- "thermodynamic limits of covalent bonds in ceramics"
-- "computational modeling of high-entropy refractory materials"
-
-**Example of BAD queries (DO NOT DO THIS):**
-- ("atomic-scale engineering" OR "bond network modification") AND ("ultra-high temperature ceramics")
-- (materials science) AND (UHTCs OR "refactory materials") AND (stability > 5000 K)
-
-Your final output must be ONLY a raw JSON array of 3 strings. e.g., ["query 1", "query 2", "query 3"]`;
-        const managerResponse = await callAgent('gemini-flash-lite-latest', { contents: managerPrompt }, 'Manager');
-        let searchQueries = [];
-        try {
-            const sanitizedResponse = managerResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-            searchQueries = JSON.parse(sanitizedResponse);
-            if (!Array.isArray(searchQueries) || !searchQueries.every(q => typeof q === 'string')) {
-                 throw new Error("Manager agent output was not a valid array of strings.");
-            }
-            updateLog('Manager', `Search strategy confirmed: ${searchQueries.join(', ')}`);
-        } catch (e) {
-            updateLog('Manager', `Error parsing search queries: ${e.message}. Raw response: ${managerResponse}`);
-            throw new Error("Manager failed to produce valid JSON for search queries.");
-        }
-
-        // 2. Researcher: Execute search and gather data
-        let searchResults = '';
-        for (const query of searchQueries) {
-            updateLog('Researcher', `Searching for: "${query}"...`);
-            const researcherPrompt = `Using your search tool, find relevant academic literature for the query: "${query}". Provide a detailed summary of the findings, including any links found.`;
-            const searchResult = await callAgent('gemini-2.5-flash', { contents: researcherPrompt, config: { tools: [{ googleSearch: {} }] } }, 'Researcher');
-            searchResults += `\n\n--- Results for query: "${query}" ---\n${searchResult}`;
-        }
-        updateLog('Researcher', `All search results collected.`);
-
-        // 3. Synthesizer: Create the final JSON output
-        const synthesizerPrompt = `You are an expert Synthesizer agent for scientific literature in the field of ${context.experimentField}.
-Your input is a raw collection of search results. Your task is to process this text and produce a single, valid JSON object that conforms to the required schema.
-
-**CRITICAL INSTRUCTIONS:**
-1.  **Write the Summary:** First, read all the search results and write a cohesive, well-structured literature review summary in Markdown format. This summary should synthesize the key findings from the provided text.
-2.  **Extract References:** Second, meticulously extract structured reference objects from the text.
-3.  **STRICTLY ENFORCE QUALITY:** You MUST discard any source where the author information is missing, is "N/A", or appears to be a generic placeholder like "Unknown". A shorter list of high-quality, fully attributed references is STRONGLY preferred over a longer, incomplete list. Do not invent authors. If a source is good but has no author, do not include it in the reference list, but you may still mention its findings in the summary.
-4.  **Schema Conformance:** Your final output must be ONLY a single JSON object with two keys: "summary" (string) and "references" (an array of reference objects).
-
-**Previous attempt failed with this feedback:** "${lastFeedback}"
-
-**Raw Search Results to Process:**
-${searchResults}`;
-        const synthesizerResponse = await callAgent('gemini-2.5-flash', {
-            contents: synthesizerPrompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: LITERATURE_REVIEW_SCHEMA,
-            }
-        }, 'Synthesizer');
-        updateLog('Synthesizer', 'Generated new literature review summary and reference list.');
-
-        // 4. QA: Validate the output
-        let qaPass = false;
-        try {
-            JSON.parse(synthesizerResponse); // Basic validation
-            qaPass = true; // If it parses and came from the schema'd call, assume it's good enough
-            updateLog('QA', 'Validation passed. The JSON structure is correct.');
-        } catch (e) {
-            lastFeedback = `The generated output was not valid JSON. Error: ${e.message}. Please try again, ensuring your entire output is a single, perfectly-formed JSON object.`;
-            updateLog('QA', lastFeedback);
-        }
-
-        if (qaPass) {
-            updateLog('System', 'Literature Review complete.');
-            return synthesizerResponse;
-        }
-    }
-
-    throw new Error(`Literature Review generation failed after ${maxIterations} attempts.`);
+    const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: basePrompt, config }, (log) => updateLog('System', log));
+    const result = response.text;
+    
+    updateLog('System', 'Review complete. Formatting results.');
+    return result;
 };
 
+
 /**
- * Executes a robust, multi-step agentic workflow for data analysis.
- * This approach breaks down the complex task of analysis and visualization
- * into smaller, more reliable steps to ensure a successful outcome.
+ * New agentic workflow for Step 7: Data Analysis & Visualization.
+ * Implements a three-agent pipeline: Planner, Dataset-Builder, and Plotter.
  */
 export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
-    const callAgentWithLog = async (agentName: string, model: string, params: any, timeout = 60000) => {
-        updateLog(agentName, 'is thinking...');
-        const retryLog = (msg: string) => updateLog('System', `[${agentName}] ${msg}`);
-        const response = await callGeminiWithRetry(gemini, model, params, retryLog, 5, timeout);
-        const result = response.text.trim();
-        updateLog(agentName, 'has completed its task.');
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
-        return result;
-    };
+    const context = getStepContext(experiment, 7);
 
-    try {
-        // --- STEP 1: Generate Summary ---
-        updateLog('Analyst', 'Analyzing data and generating a textual summary...');
-        const summaryPrompt = `You are an expert data scientist AI. Your first task is to analyze the provided CSV data and write a detailed interpretation in Markdown format.
--   **Project Context:**
-    -   Field of Study: ${experiment.field}
-    -   Research Question: ${experiment.stepData[1]?.output ? JSON.parse(experiment.stepData[1].output).research_question : 'N/A'}
-    -   Hypothesis: ${experiment.stepData[3]?.output || 'N/A'}
--   **Instructions:** Identify key trends, significant findings, correlations, and any potential outliers. Your summary should be insightful and relevant to the project's context. Do NOT suggest charts yet.
--   **CSV Data:**
-    \`\`\`csv
-    ${csvData}
-    \`\`\``;
-        const summary = await callAgentWithLog('Analyst', 'gemini-2.5-flash', { contents: summaryPrompt });
+    // --- AGENT 1: PLANNER ---
+    updateLog('Planner', 'Analyzing data structure to create a visualization plan...');
+    const csvLines = csvData.trim().split('\n');
+    const csvHeader = csvLines[0];
+    const csvSample = csvLines.slice(1, 4).join('\n');
+    const plannerPrompt = `You are a Data Scientist Planner. Your goal is to create a visualization plan for a dataset.
+Rules:
+1.  Each visualization must use 3 or fewer variables (columns).
+2.  Suggest 'bar' charts for categorical data or when there are few data points.
+3.  Suggest 'line' charts for time-series data or continuous data with many points.
+4.  Suggest 'scatter' plots to show the relationship between two numerical variables.
 
-        // --- STEP 2: Plan Visualizations ---
-        updateLog('Planner', 'Creating a plan for data visualizations...');
-        const planPrompt = `You are a data visualization planner. Based on the provided CSV data and analysis summary, propose 2-3 diverse and meaningful visualizations.
--   **Instructions:** For each visualization, describe its type, goal, and the exact column names needed. Your output must be a single, raw JSON object conforming to the required schema.
--   **Analysis Summary:** ${summary}
--   **CSV Data:**
-    \`\`\`csv
-    ${csvData}
-    \`\`\``;
-        const planJson = await callAgentWithLog('Planner', 'gemini-2.5-flash', {
-            contents: planPrompt,
-            config: { responseMimeType: 'application/json', responseSchema: ANALYSIS_PLAN_SCHEMA }
+Dataset Info:
+- Research Question: ${context.question}
+- Hypothesis: ${context.hypothesis}
+- CSV Header: ${csvHeader}
+- Data Sample:
+${csvSample}
+
+Based on this, create a JSON object with a 'charts' array, defining 2-3 appropriate visualizations.`;
+
+    const plannerResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
+        contents: plannerPrompt,
+        config: { responseMimeType: "application/json", responseSchema: VISUALIZATION_PLAN_SCHEMA }
+    });
+    const plan = JSON.parse(plannerResponse.text).charts;
+    updateLog('Planner', `Plan created with ${plan.length} visualizations.`);
+
+    const generatedCharts = [];
+
+    for (const chartPlan of plan) {
+        // --- AGENT 2: DATASET-BUILDER ---
+        updateLog('Dataset-Builder', `Preparing data for chart: "${chartPlan.title}"`);
+        const builderPrompt = `You are a data preparation specialist. Based on the visualization plan and the full CSV data, create a valid Chart.js JSON object for the following chart.
+- Chart Goal: ${chartPlan.title} (${chartPlan.explanation})
+- Chart Type: ${chartPlan.chartType}
+- Columns to use: ${chartPlan.columns.join(', ')}
+
+Full CSV Data:
+${csvData}
+
+Respond with ONLY the raw Chart.js JSON object.`;
+        
+        const builderResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
+            contents: builderPrompt,
+            config: { responseMimeType: "application/json", responseSchema: CHART_JS_SCHEMA }
         });
-        const plan = JSON.parse(planJson).plan;
+        const chartJsConfig = builderResponse.text;
+        updateLog('Dataset-Builder', `Chart.js JSON created for "${chartPlan.title}".`);
 
-        // --- STEP 3: Generate Each Chart ---
-        const chartSuggestions = [];
-        for (let i = 0; i < plan.length; i++) {
-            const chartGoal = plan[i];
-            updateLog('Visualizer', `Generating Chart ${i + 1}/${plan.length}: ${chartGoal.goal}`);
-            const chartPrompt = `You are a Chart.js expert. Your task is to generate a single, valid Chart.js JSON configuration object.
--   **Instructions:** Create a '${chartGoal.chartType}' chart to achieve this goal: "${chartGoal.goal}". Use the exact column names: ${chartGoal.columns.join(', ')}. Your output must be ONLY the raw JSON object conforming to the schema. Do not include any styling properties (like backgroundColor or borderColor).
--   **CSV Data:**
-    \`\`\`csv
-    ${csvData}
-    \`\`\``;
-            try {
-                const chartJson = await callAgentWithLog('Visualizer', 'gemini-2.5-flash', {
-                    contents: chartPrompt,
-                    config: { responseMimeType: 'application/json', responseSchema: CHART_JS_SCHEMA }
-                });
-                chartSuggestions.push(JSON.parse(chartJson));
-            } catch (chartError) {
-                updateLog('System', `Warning: Failed to generate Chart ${i + 1}. Error: ${chartError.message}. Skipping this chart.`);
-            }
+        // --- AGENT 3: PLOTTER ---
+        updateLog('Plotter', `Generating image for chart: "${chartPlan.title}"`);
+        const plotterPrompt = `Generate a high-quality, professional '${chartPlan.chartType}' chart with a dark theme, suitable for a scientific publication. The chart's title should be "${chartPlan.title}". The data for the chart is provided in the following JSON object. Plot this data accurately and clearly.
+
+Chart Data:
+${chartJsConfig}`;
+
+        const plotterResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash-image', {
+            contents: { parts: [{ text: plotterPrompt }] },
+            config: { responseModalities: [Modality.IMAGE] }
+        });
+        
+        const imagePart = plotterResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+        if (!imagePart) {
+            throw new Error(`Plotter agent failed to generate an image for "${chartPlan.title}".`);
         }
-
-        // --- STEP 4: Assemble Final Output ---
-        const finalOutput = JSON.stringify({ summary, chartSuggestions }, null, 2);
-        updateLog('System', 'Data analysis and visualization complete.');
-        return {
-            finalOutput,
-            logSummary: `Generated analysis with ${chartSuggestions.length} visualizations.`,
-        };
-
-    } catch (error) {
-        const errorMessage = (error instanceof Error) ? error.message : String(error);
-        updateLog('System', `A critical error occurred: ${errorMessage}. Attempting to generate a fallback text-only summary.`);
-        // Fallback remains the same
-        const fallbackPrompt = `A critical error occurred during an automated attempt to analyze data and generate visualizations. Your task is to provide a basic textual summary of the data instead.
-- **Instructions:** Start your summary with "An error prevented the generation of visualizations. However, a basic analysis of the data reveals the following:". Analyze the CSV data and describe any obvious trends. Keep the summary in Markdown format.
-- **Data:** \`\`\`csv\n${csvData}\n\`\`\``;
-        const fallbackSummary = await callAgentWithLog('System', 'gemini-2.5-flash', { contents: fallbackPrompt });
-        return {
-            finalOutput: JSON.stringify({ summary: fallbackSummary, chartSuggestions: [] }),
-            logSummary: 'Workflow failed, but a fallback summary was generated.'
-        };
+        
+        const imageData = imagePart.inlineData.data;
+        generatedCharts.push({ title: chartPlan.title, imageData });
+        updateLog('Plotter', `Image generated for "${chartPlan.title}".`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause to avoid rate limiting
     }
+
+    // --- FINAL SUMMARY ---
+    updateLog('System', 'All visualizations generated. Compiling final report...');
+    const summaryPrompt = `Based on the research question, hypothesis, and the visualization plan that was just executed, write a detailed summary and interpretation of the data analysis findings in Markdown format.
+- Research Question: ${context.question}
+- Hypothesis: ${context.hypothesis}
+- Visualizations Created:
+${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.explanation}`).join('\n')}
+`;
+    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt });
+    const summary = summaryResponse.text;
+
+    const finalOutput = JSON.stringify({ summary, charts: generatedCharts });
+    const logSummary = `Generated ${generatedCharts.length} charts and a summary based on the analysis plan.`;
+
+    return { finalOutput, logSummary };
+};
+
+
+/**
+ * Agentic workflow for Step 10: Publication Exporter.
+ */
+export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => {
+    const fullContext = getStepContext(experiment, 10).full_project_summary_log;
+    let finalDoc = '';
+
+    // Agent 1: Manager (Outliner)
+    updateLog('Manager', 'Analyzing project log to create a publication outline...');
+    const outlinePrompt = `You are a scientific editor. Based on the provided research log, create a standard publication outline as a JSON array of strings (e.g., ["Abstract", "Introduction", "Methodology", "Results", "Discussion", "Conclusion", "References"]). Research Log:\n\n${fullContext}`;
+    const outlineResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: outlinePrompt });
+    const outline = JSON.parse(outlineResponse.text.replace(/```json/g, '').replace(/```/g, ''));
+    updateLog('Manager', 'Outline created: ' + outline.join(', '));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Agent 2: Writer (Section by Section)
+    const sections = {};
+    for (const section of outline) {
+        updateLog('Writer', `Drafting section: ${section}...`);
+        const writerPrompt = `You are a scientific writer. Using the full research log, write the "${section}" section of a scientific paper. For the 'Results' section, insert placeholders like [CHART_1: A descriptive caption], [CHART_2: Another caption], etc., where charts should appear. For the 'References' section, format them professionally. Full Log:\n\n${fullContext}`;
+        const sectionResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: writerPrompt }, (log) => updateLog('System', log), 5, 120000);
+        sections[section] = sectionResponse.text;
+        updateLog('Writer', `"${section}" section complete.`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+
+    // Agent 3: Editor (Compiler and Finisher)
+    updateLog('Editor', 'Assembling and polishing the final manuscript...');
+    const editorPrompt = `You are a final editor. Combine the following sections into a single, cohesive scientific paper. Add a suitable title, ensure smooth transitions, and check for consistency. Here are the sections:\n\n${JSON.stringify(sections, null, 2)}`;
+    const finalResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: editorPrompt }, (log) => updateLog('System', log), 5, 120000);
+    finalDoc = finalResponse.text;
+    updateLog('Editor', 'Final manuscript complete.');
+
+    return finalDoc;
 };

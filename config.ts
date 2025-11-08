@@ -229,15 +229,15 @@ export const DYNAMIC_TABLE_SCHEMA = {
 
 
 /**
- * @const ANALYSIS_PLAN_SCHEMA
- * Schema for the new "Manager" agent in Step 7 to create a multi-chart analysis plan.
+ * @const VISUALIZATION_PLAN_SCHEMA
+ * Schema for the Planner agent in Step 7 to create a multi-chart analysis plan.
  */
-export const ANALYSIS_PLAN_SCHEMA = {
+export const VISUALIZATION_PLAN_SCHEMA = {
     type: Type.OBJECT,
     properties: {
-        plan: {
+        charts: {
             type: Type.ARRAY,
-            description: "An array of 2-3 planned visualizations for the data.",
+            description: "An array of 2-4 planned visualizations for the data.",
             items: {
                 type: Type.OBJECT,
                 properties: {
@@ -245,21 +245,25 @@ export const ANALYSIS_PLAN_SCHEMA = {
                         type: Type.STRING,
                         description: "The type of chart to generate. Must be one of: 'bar', 'line', 'scatter'."
                     },
-                    goal: {
+                    title: {
                         type: Type.STRING,
-                        description: "A clear, one-sentence description of what this chart should show. This will be used as an instruction for another AI. Be specific about aggregations (e.g., 'average', 'total') and filtering (e.g., 'for the Aged model')."
+                        description: "A clear, descriptive title for this chart."
+                    },
+                    explanation: {
+                        type: Type.STRING,
+                        description: "A one-sentence explanation of what this chart will show and why it's useful for the analysis."
                     },
                     columns: {
                         type: Type.ARRAY,
-                        description: "The exact column names from the CSV needed to create this chart.",
+                        description: "The exact column names from the CSV needed to create this chart. Should not exceed 3.",
                         items: { type: Type.STRING }
                     }
                 },
-                required: ["chartType", "goal", "columns"]
+                required: ["chartType", "title", "explanation", "columns"]
             }
         }
     },
-    required: ["plan"]
+    required: ["charts"]
 };
 
 
@@ -309,66 +313,38 @@ export const CHART_JS_SCHEMA = {
 
 
 /**
- * @const DATA_ANALYZER_SCHEMA
- * Defines the expected JSON structure for the output of Step 7 (Data Analyzer).
- * This ensures the AI provides data in a consistent, parsable format for rendering charts.
+ * @const DATA_ANALYSIS_IMAGE_OUTPUT_SCHEMA
+ * Defines the expected JSON structure for the final output of Step 7 (Data Analyzer).
+ * This now contains a summary and an array of base64 encoded chart images.
  */
-export const DATA_ANALYZER_SCHEMA = {
+export const DATA_ANALYSIS_IMAGE_OUTPUT_SCHEMA = {
     type: Type.OBJECT,
     properties: {
         summary: {
             type: Type.STRING,
-            description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format. This can include Markdown tables if they are the primary visualization."
+            description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format."
         },
-        chartSuggestions: {
+        charts: {
             type: Type.ARRAY,
-            description: "An array of chart configurations for visualizing the data. Each object must be a valid Chart.js configuration.",
+            description: "An array of generated chart objects.",
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    type: {
+                    title: {
                         type: Type.STRING,
-                        description: "The type of chart (e.g., 'bar', 'line', 'scatter')."
+                        description: "A descriptive title for the chart."
                     },
-                    data: {
-                        type: Type.OBJECT,
-                        description: "The data object for Chart.js, including labels and datasets.",
-                        properties: {
-                            labels: {
-                                type: Type.ARRAY,
-                                items: { type: Type.STRING }
-                            },
-                            datasets: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        label: { type: Type.STRING },
-                                        data: {
-                                            type: Type.ARRAY,
-                                            description: "An array of data points. For 'bar'/'line', an array of numbers. For 'scatter', an array of objects like {x: number, y: number}."
-                                        },
-                                        backgroundColor: {
-                                            type: Type.ARRAY,
-                                            items: { type: Type.STRING }
-                                        },
-                                        borderColor: {
-                                            type: Type.ARRAY,
-                                            items: { type: Type.STRING }
-                                        },
-                                        borderWidth: { type: Type.NUMBER }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    options: {
-                        type: Type.OBJECT,
-                        description: "The options object for Chart.js, including scales, plugins, etc."
+                    imageData: {
+                        type: Type.STRING,
+                        description: "A base64 encoded PNG image string."
                     }
-                }
+                },
+                required: ["title", "imageData"]
             }
         }
     },
-    required: ["summary", "chartSuggestions"]
+    required: ["summary", "charts"]
 };
+
+// @deprecated - This schema is replaced by DATA_ANALYSIS_IMAGE_OUTPUT_SCHEMA
+export const DATA_ANALYZER_SCHEMA = {};

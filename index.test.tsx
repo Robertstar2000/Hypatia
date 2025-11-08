@@ -41,26 +41,28 @@ const STEP_SPECIFIC_TUNING_PARAMETERS = {
 
 const WORKFLOW_STEPS = [ { id: 1, title: 'Research Question'}, { id: 2, title: 'Literature Review'}, { id: 3, title: 'Hypothesis Formulation'}, { id: 4, title: 'Methodology Design'}, { id: 5, title: 'Data Collection Plan'}, { id: 6, title: 'Experiment Runner / Data Synthesis'}, { id: 7, title: 'Data Analyzer'}, { id: 8, title: 'Conclusion Drawing'}, { id: 9, title: 'Peer Review Simulation'}, { id: 10, title: 'Publication Exporter'} ];
 
-const DATA_ANALYZER_SCHEMA = {
+// Updated schema to reflect the new image-based output of Step 7
+const DATA_ANALYSIS_IMAGE_OUTPUT_SCHEMA = {
     type: Type.OBJECT,
     properties: {
         summary: {
             type: Type.STRING,
             description: "A detailed summary and interpretation of the data analysis findings, written in Markdown format."
         },
-        chartSuggestions: {
+        charts: {
             type: Type.ARRAY,
-            description: "An array of chart configurations suggested for visualizing the data. Each object should be a valid Chart.js configuration.",
+            description: "An array of generated chart objects.",
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    type: { type: Type.STRING, description: "The type of chart (e.g., 'bar', 'line', 'pie', 'scatter')." },
-                    data: { type: Type.OBJECT, description: "The data object for Chart.js, including labels and datasets.", properties: { labels: { type: Type.ARRAY, items: { type: Type.STRING } }, datasets: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, data: { type: Type.ARRAY, items: { type: Type.NUMBER } }, backgroundColor: { type: Type.ARRAY, items: { type: Type.STRING } }, borderColor: { type: Type.ARRAY, items: { type: Type.STRING } }, borderWidth: { type: Type.NUMBER } } } } } },
-                    options: { type: Type.OBJECT, description: "The options object for Chart.js, including scales, plugins, etc.", properties: { scales: { type: Type.OBJECT, description: "Configuration for the chart's axes. Can be empty for charts like 'pie'.", properties: { y: { type: Type.OBJECT, properties: { beginAtZero: { type: Type.BOOLEAN } } }, x: { type: Type.OBJECT, properties: { title: { type: Type.OBJECT, properties: { display: {type: Type.BOOLEAN}, text: {type: Type.STRING} } } } } } } } }
-                }
+                    title: { type: Type.STRING },
+                    imageData: { type: Type.STRING } // base64 string
+                },
+                required: ["title", "imageData"]
             }
         }
-    }
+    },
+    required: ["summary", "charts"]
 };
 
 
@@ -144,10 +146,9 @@ const getPromptForStep = (stepId: number, userInput: string, context: any, fineT
             config.tools = [{ googleSearch: {} }];
             break;
         case 7:
-            expectJson = true;
+            // This is now an agentic workflow, so this simple prompt is no longer used.
+            // This case is kept for legacy test compatibility but is not active in the new workflow.
             basePrompt = `Analyze data: ${userInput}`;
-            config.responseMimeType = "application/json";
-            config.responseSchema = DATA_ANALYZER_SCHEMA;
             break;
         case 9:
              basePrompt = `Review this log: ${context.full_project_summary_log}`;
@@ -214,12 +215,12 @@ export const appTests = [
         }
     },
     {
-        name: "[Unit] getPromptForStep: Step 7 should expect JSON with a specific schema",
+        name: "[Unit] getPromptForStep: Step 7 is now agentic, has no special config here",
         fn: async () => {
             const { expectJson, config } = getPromptForStep(7, "", {}, {});
-            expect(expectJson).toBe(true);
-            expect(config.responseMimeType).toBe("application/json");
-            expect(config.responseSchema).toEqual(DATA_ANALYZER_SCHEMA);
+            expect(expectJson).toBe(false); // No longer expects JSON directly
+            expect(config.responseMimeType).toBe(undefined);
+            expect(config.responseSchema).toBe(undefined);
         }
     },
     {
@@ -242,22 +243,24 @@ export const appTests = [
         }
     },
     {
-        name: "[Logic] GeneratedOutput JSON Parser: Handles valid JSON with schema",
+        name: "[Logic] GeneratedOutput JSON Parser: Handles valid image-based analysis JSON",
         fn: () => {
-            const validJsonString = `{"summary":"Test summary","chartSuggestions":[{"type":"bar","data":{"labels":["A"],"datasets":[{"data":[1]}]}}]}`;
+            const validJsonString = `{"summary":"Test summary","charts":[{"title":"Chart 1","imageData":"base64string"}]}`;
             const parsed = JSON.parse(validJsonString);
             expect(parsed.summary).toBe("Test summary");
-            expect(Array.isArray(parsed.chartSuggestions)).toBe(true);
+            expect(Array.isArray(parsed.charts)).toBe(true);
+            expect(parsed.charts[0].title).toBe("Chart 1");
+            expect(parsed.charts[0].imageData).toBe("base64string");
         }
     },
     {
-        name: "[Logic] GeneratedOutput JSON Parser: Throws on JSON missing required fields",
+        name: "[Logic] GeneratedOutput JSON Parser: Throws on image-based JSON missing required fields",
         fn: () => {
-            const jsonMissingSummary = `{"chartSuggestions":[]}`;
+            const jsonMissingSummary = `{"charts":[]}`;
             const jsonMissingCharts = `{"summary":"A summary"}`;
             const parseAndCheck = (json) => {
                 const parsed = JSON.parse(json);
-                if (!parsed.summary || !parsed.chartSuggestions) {
+                if (!parsed.summary || !parsed.charts) {
                     throw new Error("Missing required fields");
                 }
             };

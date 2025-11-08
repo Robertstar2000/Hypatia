@@ -20,9 +20,8 @@ import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
 import { runPublicationAgent, parseGeminiError } from '../../services';
 import { AgenticAnalysisView } from '../common/AgenticAnalysisView';
-import { ensureChartStyling } from '../../utils/chartUtils';
 
-// Register all the necessary components for Chart.js
+// Register Chart.js components for legacy support if any old projects exist
 Chart.register(
     LineController,
     BarController,
@@ -51,8 +50,9 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
             const chartPlaceholders = publicationText.match(/\[CHART_(\d+):([\s\S]*?)\]/g) || [];
             
             if (chartPlaceholders.length > 0) {
-                const analysisData = JSON.parse(activeExperiment.stepData[7]?.output || '{}');
-                const chartConfigs = analysisData.chartSuggestions || [];
+                const analysisJson = activeExperiment.stepData[7]?.output || '{}';
+                const analysisData = JSON.parse(analysisJson);
+                const charts = analysisData.charts || []; // Use the new structure with image data
     
                 for (const placeholder of chartPlaceholders) {
                     const match = placeholder.match(/\[CHART_(\d+):([\s\S]*?)\]/);
@@ -61,47 +61,10 @@ export const FinalPublicationView = ({ publicationText, onRegenerate, showRegene
                     const chartIndex = parseInt(match[1], 10) - 1;
                     const caption = match[2];
     
-                    if (chartConfigs[chartIndex]) {
-                        try {
-                            const dataUrl = await new Promise<string>((resolve, reject) => {
-                                const offscreenCanvas = document.createElement('canvas');
-                                offscreenCanvas.width = 800;
-                                offscreenCanvas.height = 450;
-                                const ctx = offscreenCanvas.getContext('2d');
-                                if (!ctx) return reject('Failed to get 2D context');
-
-                                const chartConfig = chartConfigs[chartIndex];
-                                const styledConfig = ensureChartStyling(chartConfig);
-                                
-                                styledConfig.options.animation = false; // Disable animations for instant rendering
-                                
-                                new Chart(ctx, {
-                                    ...styledConfig,
-                                    plugins: [{
-                                        id: 'customCanvasBackgroundColor',
-                                        beforeDraw: (chart) => {
-                                            const ctx = chart.canvas.getContext('2d');
-                                            ctx.save();
-                                            ctx.globalCompositeOperation = 'destination-over';
-                                            ctx.fillStyle = 'white'; // Render on a white background
-                                            ctx.fillRect(0, 0, chart.width, chart.height);
-                                            ctx.restore();
-                                        }
-                                    }]
-                                });
-
-                                // Give a short timeout to ensure rendering is complete before getting data URL
-                                setTimeout(() => {
-                                    resolve(offscreenCanvas.toDataURL('image/png'));
-                                }, 100);
-                            });
-    
-                            const imgTag = `<figure style="text-align: center;"><img src="${dataUrl}" alt="${caption}" style="max-width: 80%; height: auto; display: block; margin: 1rem auto;" /><figcaption style="font-size: 0.9em; color: #aaa; margin-top: 0.5em;">${caption}</figcaption></figure>`;
-                            processedText = processedText.replace(placeholder, imgTag);
-                        } catch (e) {
-                             console.error("Chart rendering for placeholder failed:", placeholder, e);
-                             processedText = processedText.replace(placeholder, `<p class="text-danger">[Error rendering chart: ${e.message}]</p>`);
-                        }
+                    if (charts[chartIndex] && charts[chartIndex].imageData) {
+                        const dataUrl = `data:image/png;base64,${charts[chartIndex].imageData}`;
+                        const imgTag = `<figure style="text-align: center;"><img src="${dataUrl}" alt="${caption}" style="max-width: 80%; height: auto; display: block; margin: 1rem auto; border: 1px solid #444;" /><figcaption style="font-size: 0.9em; color: #aaa; margin-top: 0.5em;">${caption}</figcaption></figure>`;
+                        processedText = processedText.replace(placeholder, imgTag);
                     } else {
                          processedText = processedText.replace(placeholder, `<p class="text-warning">[Chart data for placeholder not found.]</p>`);
                     }

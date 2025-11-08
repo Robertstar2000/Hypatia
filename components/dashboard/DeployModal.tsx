@@ -10,12 +10,6 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
     const [activeVirtualStep, setActiveVirtualStep] = useState<number | null>(null);
     const { addToast } = useToast();
 
-    const handleArchiveAction = async () => {
-        await onUpdateExperiment({ ...experiment, status: 'archived' });
-        addToast("Project archived.", 'success');
-        onClose();
-    };
-
     const handleAction = async (step: number, forceRegenerate: boolean = false) => {
         if (isLoading) return;
         setActiveVirtualStep(step);
@@ -142,7 +136,6 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
                     {experiment.stepData[11]?.output ? 'View/Edit' : 'Generate'} Submission Checklist
                 </button>
                 <button className="btn btn-outline-secondary" onClick={() => onExportExperiment(experiment)}>Export for Collaboration</button>
-                <button className="btn btn-outline-warning" onClick={handleArchiveAction}>Archive Project</button>
             </div>
         </>
     );
@@ -156,7 +149,6 @@ export const DeployModal = ({ experiment, onClose, onUpdateExperiment, onExportE
                     {experiment.stepData[12]?.output ? 'View/Edit' : 'Generate'} Presentation Outline
                 </button>
                 <button className="btn btn-outline-secondary" onClick={generateShareableSummary}>Download Shareable Summary (HTML)</button>
-                <button className="btn btn-outline-warning" onClick={handleArchiveAction}>Archive Project</button>
             </div>
         </>
     );

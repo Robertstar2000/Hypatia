@@ -6,8 +6,6 @@ import { FinalPublicationView } from '../steps/PublicationExporter';
 import { useToast } from '../../toast';
 import { DataAnalysisView } from '../common/DataAnalysisView';
 import JSZip from 'jszip';
-import { Chart } from 'chart.js';
-import { ensureChartStyling } from '../../utils/chartUtils';
 import { getStepContext, getPromptForStep, callGeminiWithRetry, parseGeminiError } from '../../services';
 
 export const ProjectCompletionView = () => {
@@ -31,7 +29,7 @@ export const ProjectCompletionView = () => {
     } catch (e) {
         analysisData = null;
     }
-    const charts = analysisData?.chartSuggestions || [];
+    const charts = analysisData?.charts || [];
 
     const handleGenerateExplanation = async () => {
         if (!gemini || !publicationText || isGenerating) return;
@@ -113,41 +111,6 @@ export const ProjectCompletionView = () => {
         addToast(`Paper downloaded as .${format}`, 'success');
     };
     
-    const renderChartToDataURL = (config) => {
-        return new Promise<string>((resolve, reject) => {
-            const offscreenCanvas = document.createElement('canvas');
-            offscreenCanvas.width = 800; 
-            offscreenCanvas.height = 450;
-            const ctx = offscreenCanvas.getContext('2d');
-            if (!ctx) return reject('Could not get canvas context');
-
-            try {
-                const styledConfig = ensureChartStyling(config);
-                styledConfig.options.animation = false; // Disable for instant render
-
-                new Chart(ctx, {
-                    ...styledConfig,
-                    plugins: [{
-                        id: 'customCanvasBackgroundColor',
-                        beforeDraw: (chart) => {
-                            const ctx = chart.canvas.getContext('2d');
-                            ctx.save();
-                            ctx.globalCompositeOperation = 'destination-over';
-                            ctx.fillStyle = 'white';
-                            ctx.fillRect(0, 0, chart.width, chart.height);
-                            ctx.restore();
-                        }
-                    }]
-                });
-
-                // Small delay to ensure render completes
-                setTimeout(() => resolve(offscreenCanvas.toDataURL('image/png')), 100);
-            } catch(e) { 
-                reject(e); 
-            }
-        });
-    };
-
     const handleDownloadAll = async () => {
         addToast("Preparing zip file... This may take a moment.", 'info');
         try {
@@ -167,11 +130,11 @@ export const ProjectCompletionView = () => {
             if (charts.length > 0) {
                 const vizFolder = projectFolder.folder('visualizations');
                 for (let i = 0; i < charts.length; i++) {
-                    try {
-                        const dataUrl = await renderChartToDataURL(charts[i]);
-                        const base64Data = dataUrl.split(',')[1];
-                        vizFolder.file(`chart_${i + 1}.png`, base64Data, { base64: true });
-                    } catch(e) { console.error(`Failed to zip chart ${i+1}:`, e); }
+                    const chart = charts[i];
+                    if (chart.imageData) {
+                        const filename = `chart_${i + 1}_${(chart.title || 'Untitled').replace(/[^\w.-]/g, '_')}.png`;
+                        vizFolder.file(filename, chart.imageData, { base64: true });
+                    }
                 }
             }
             
@@ -216,10 +179,12 @@ export const ProjectCompletionView = () => {
 
     const handleDownloadChart = async (chartIndex) => {
         try {
-            const dataUrl = await renderChartToDataURL(charts[chartIndex]);
+            const chart = charts[chartIndex];
+            if (!chart || !chart.imageData) throw new Error("Image data not found.");
+            const dataUrl = `data:image/png;base64,${chart.imageData}`;
             const link = document.createElement('a');
             link.href = dataUrl;
-            link.download = `visualization_${chartIndex + 1}.png`;
+            link.download = `visualization_${chartIndex + 1}_${(chart.title || 'Untitled').replace(/[^\w.-]/g, '_')}.png`;
             link.click();
         } catch (e) { addToast("Failed to download chart image.", 'danger'); }
     };
@@ -305,13 +270,18 @@ export const ProjectCompletionView = () => {
                     </> : <div className="alert alert-info">No experimental data was generated or uploaded for this project.</div>}
                 </div>
                 <div className="tab-pane fade p-3" id="viz-pane" role="tabpanel">
-                    {charts.length > 0 ? <>
-                         <div className="row">
-                            {charts.map((chartConfig, index) => (
-                                <div className="col-md-6 mb-3" key={index}>
+                    {charts.length > 0 ? (
+                        <div className="row">
+                            {charts.map((chart, index) => (
+                                <div className="col-lg-6 mb-3" key={index}>
                                     <div className="card h-100">
-                                        <div className="card-body" style={{ minHeight: '300px', position: 'relative' }}>
-                                            <DataAnalysisView analysisData={{ chartSuggestions: [chartConfig] }} />
+                                        <div className="card-header fw-bold">{chart.title}</div>
+                                        <div className="card-body d-flex align-items-center justify-content-center p-2" style={{minHeight: '300px'}}>
+                                             <img
+                                                src={`data:image/png;base64,${chart.imageData}`}
+                                                alt={chart.title}
+                                                style={{ maxWidth: '100%', maxHeight: '400px', objectFit: 'contain' }}
+                                            />
                                         </div>
                                         <div className="card-footer bg-transparent text-end">
                                             <button className="btn btn-sm btn-secondary" onClick={() => handleDownloadChart(index)}><i className="bi bi-image me-1"></i> Download PNG</button>
@@ -320,7 +290,7 @@ export const ProjectCompletionView = () => {
                                 </div>
                             ))}
                         </div>
-                    </> : <div className="alert alert-info">No visualizations were generated for this project.</div>}
+                    ) : <div className="alert alert-info">No visualizations were generated for this project.</div>}
                 </div>
             </div>
         </div>

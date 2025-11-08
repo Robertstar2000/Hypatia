@@ -5,12 +5,13 @@ import { Experiment } from '../../config';
 export const ExperimentCard: React.FC<{
     exp: Experiment;
     isArchived?: boolean;
+    onArchive: (exp: Experiment) => Promise<void>;
     onUnarchive: (exp: Experiment) => Promise<void>;
     deleteExperiment: (id: string) => Promise<void>;
     selectExperiment: (id: string) => void;
     handleDeployClick: (experiment: Experiment) => void;
     handleExport: (experiment: Experiment) => void;
-}> = ({ exp, isArchived = false, onUnarchive, deleteExperiment, selectExperiment, handleDeployClick, handleExport }) => (
+}> = ({ exp, isArchived = false, onArchive, onUnarchive, deleteExperiment, selectExperiment, handleDeployClick, handleExport }) => (
     <div className={`col-md-6 col-lg-4 mb-4`}>
         <div className={`card h-100 d-flex flex-column ${isArchived ? 'archived-project-card' : ''}`}>
             <div className="card-body flex-grow-1">
@@ -23,10 +24,12 @@ export const ExperimentCard: React.FC<{
                     <div className="progress-bar" style={{ width: `${exp.currentStep * 10}%` }}></div>
                 </div>
                 {isArchived ? (
-                    <>
-                        <button className="btn btn-sm btn-outline-light me-2" onClick={() => onUnarchive(exp)}>Unarchive</button>
+                    <div className="d-flex justify-content-between">
+                        <button className="btn btn-sm btn-outline-light" onClick={() => onUnarchive(exp)}>
+                             <i className="bi bi-box-arrow-in-up me-1"></i> Unarchive
+                        </button>
                         <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(exp.id)}><i className="bi bi-trash"></i></button>
-                    </>
+                    </div>
                 ) : (
                     <>
                         {exp.currentStep >= 10 && exp.stepData[10]?.output ? (
@@ -40,6 +43,7 @@ export const ExperimentCard: React.FC<{
                         )}
                         <div className="d-flex justify-content-between">
                             <button className="btn btn-sm btn-outline-secondary" onClick={() => handleExport(exp)}><i className="bi bi-download me-1"></i> Export</button>
+                            <button className="btn btn-sm btn-outline-warning" onClick={() => onArchive(exp)}><i className="bi bi-archive me-1"></i> Archive</button>
                             <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(exp.id)}><i className="bi bi-trash"></i></button>
                         </div>
                     </>

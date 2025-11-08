@@ -99,19 +99,25 @@ export const callGeminiWithRetry = async (
             const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }), timeout);
             return response;
         } catch (error) {
-            const errorMessage = error.toString();
-            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
-            const isTimeoutError = errorMessage.includes('timed out');
-            
-            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
-                attempt++;
-                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
+            const errorMessage = error.toString().toLowerCase();
+            const isNonRetriableError = 
+                errorMessage.includes('api key not valid') || 
+                error.status === 'INVALID_ARGUMENT' || 
+                errorMessage.includes('400');
 
+            if (!isNonRetriableError && attempt < maxRetries - 1) {
+                attempt++;
+                const reason = errorMessage.includes('429') || error.status === 'RESOURCE_EXHAUSTED'
+                    ? 'rate limit hit'
+                    : errorMessage.includes('timed out')
+                    ? 'timed out'
+                    : 'a transient error occurred';
+                
                 // Prioritize server-suggested delay, otherwise use exponential backoff
                 const serverDelay = getRetryDelay(error);
                 const retryAfterMs = serverDelay ?? delay;
                 
-                const logMessage = `Call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const logMessage = `Call failed because ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 
                 await new Promise(resolve => setTimeout(resolve, retryAfterMs));
@@ -121,7 +127,7 @@ export const callGeminiWithRetry = async (
                     delay *= 2; 
                 }
             } else {
-                throw error; // Rethrow for other errors or if max retries are reached
+                throw error; // Rethrow for non-retriable errors or if max retries are reached
             }
         }
     }
@@ -137,28 +143,35 @@ export const callGeminiStreamWithRetry = async (
     model: string,
     params: any,
     onLog?: (message: string) => void,
-    maxRetries = 5
+    maxRetries = 5,
+    timeout: number = 120000
 ) => {
     let attempt = 0;
     let delay = 30000;
     while (attempt < maxRetries) {
         try {
-            const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }));
+            const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }), timeout);
             return stream;
         } catch (error) {
-            const errorMessage = error.toString();
-            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
-            const isTimeoutError = errorMessage.includes('timed out');
-            
-            if ((isRateLimitError || isTimeoutError) && attempt < maxRetries - 1) {
+            const errorMessage = error.toString().toLowerCase();
+            const isNonRetriableError = 
+                errorMessage.includes('api key not valid') || 
+                error.status === 'INVALID_ARGUMENT' || 
+                errorMessage.includes('400');
+
+            if (!isNonRetriableError && attempt < maxRetries - 1) {
                 attempt++;
-                const reason = isTimeoutError ? 'timed out' : 'rate limit hit';
+                const reason = errorMessage.includes('429') || error.status === 'RESOURCE_EXHAUSTED'
+                    ? 'rate limit hit'
+                    : errorMessage.includes('timed out')
+                    ? 'timed out'
+                    : 'a transient error occurred';
 
                 // Prioritize server-suggested delay, otherwise use exponential backoff
                 const serverDelay = getRetryDelay(error);
                 const retryAfterMs = serverDelay ?? delay;
                 
-                const logMessage = `Streaming call ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
+                const logMessage = `Streaming call failed because ${reason}. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt}/${maxRetries-1})`;
                 if (onLog) onLog(logMessage); else console.warn(logMessage);
                 
                 await new Promise(resolve => setTimeout(resolve, retryAfterMs));
@@ -417,7 +430,7 @@ Based on this, create a JSON object with a 'charts' array, defining 2-3 appropri
     const plannerResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
         contents: plannerPrompt,
         config: { responseMimeType: "application/json", responseSchema: VISUALIZATION_PLAN_SCHEMA }
-    });
+    }, (log) => updateLog('System', log));
     const plan = JSON.parse(plannerResponse.text).charts;
     updateLog('Planner', `Plan created with ${plan.length} visualizations.`);
 
@@ -439,7 +452,7 @@ Respond with ONLY the raw Chart.js JSON object.`;
         const builderResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', {
             contents: builderPrompt,
             config: { responseMimeType: "application/json", responseSchema: CHART_JS_SCHEMA }
-        });
+        }, (log) => updateLog('System', log));
         const chartJsConfig = builderResponse.text;
         updateLog('Dataset-Builder', `Chart.js JSON created for "${chartPlan.title}".`);
 
@@ -453,7 +466,7 @@ ${chartJsConfig}`;
         const plotterResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash-image', {
             contents: { parts: [{ text: plotterPrompt }] },
             config: { responseModalities: [Modality.IMAGE] }
-        });
+        }, (log) => updateLog('System', log));
         
         const imagePart = plotterResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
         if (!imagePart) {
@@ -474,7 +487,7 @@ ${chartJsConfig}`;
 - Visualizations Created:
 ${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.explanation}`).join('\n')}
 `;
-    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt });
+    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt }, (log) => updateLog('System', log));
     const summary = summaryResponse.text;
 
     const finalOutput = JSON.stringify({ summary, charts: generatedCharts });
@@ -494,7 +507,7 @@ export const runPublicationAgent = async ({ experiment, gemini, updateLog }) => 
     // Agent 1: Manager (Outliner)
     updateLog('Manager', 'Analyzing project log to create a publication outline...');
     const outlinePrompt = `You are a scientific editor. Based on the provided research log, create a standard publication outline as a JSON array of strings (e.g., ["Abstract", "Introduction", "Methodology", "Results", "Discussion", "Conclusion", "References"]). Research Log:\n\n${fullContext}`;
-    const outlineResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: outlinePrompt });
+    const outlineResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: outlinePrompt }, (log) => updateLog('System', log));
     const outline = JSON.parse(outlineResponse.text.replace(/```json/g, '').replace(/```/g, ''));
     updateLog('Manager', 'Outline created: ' + outline.join(', '));
     await new Promise(resolve => setTimeout(resolve, 2000));

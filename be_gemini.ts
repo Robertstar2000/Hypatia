@@ -2,6 +2,7 @@
 
 
 
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -392,6 +393,7 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
 /**
  * New agentic workflow for Step 7: Data Analysis & Visualization.
  * Implements a three-agent pipeline: Planner, Dataset-Builder, and Plotter.
+ * This version is resilient to individual chart generation failures.
  */
 export const runDataAnalysisAgent = async ({ experiment, csvData, gemini, updateLog }) => {
     const context = getStepContext(experiment, 7);
@@ -452,36 +454,51 @@ Respond with ONLY the raw Chart.js JSON object.`;
 
 Chart Data:
 ${chartJsConfig}`;
-
-        const plotterResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash-image', {
-            contents: { parts: [{ text: plotterPrompt }] },
-            config: { responseModalities: [Modality.IMAGE] }
-        });
         
-        const imagePart = plotterResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-        if (!imagePart) {
-            throw new Error(`Plotter agent failed to generate an image for "${chartPlan.title}".`);
+        try {
+            const plotterResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash-image', {
+                contents: { parts: [{ text: plotterPrompt }] },
+                config: { responseModalities: [Modality.IMAGE] }
+            });
+            
+            const imagePart = plotterResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+            if (!imagePart) {
+                updateLog('Plotter', `Warning: Failed to generate an image for "${chartPlan.title}". The model did not return an image. Skipping this chart.`);
+            } else {
+                const imageData = imagePart.inlineData.data;
+                generatedCharts.push({ title: chartPlan.title, imageData });
+                updateLog('Plotter', `Image generated for "${chartPlan.title}".`);
+            }
+        } catch (error) {
+            const errorMessage = parseGeminiError(error, "An unknown error occurred during plotting.");
+            updateLog('Plotter', `Warning: An API error occurred while generating image for "${chartPlan.title}": ${errorMessage}. Skipping this chart.`);
         }
         
-        const imageData = imagePart.inlineData.data;
-        generatedCharts.push({ title: chartPlan.title, imageData });
-        updateLog('Plotter', `Image generated for "${chartPlan.title}".`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased pause to avoid rate limiting
     }
 
     // --- FINAL SUMMARY ---
-    updateLog('System', 'All visualizations generated. Compiling final report...');
-    const summaryPrompt = `Based on the research question, hypothesis, and the visualization plan that was just executed, write a detailed summary and interpretation of the data analysis findings in Markdown format.
+    updateLog('System', 'All visualization attempts are complete. Compiling final report...');
+    
+    const successfulChartTitles = new Set(generatedCharts.map(c => c.title));
+    const visualizationStatusList = plan.map(p => {
+        const status = successfulChartTitles.has(p.title) ? 'Successfully generated' : 'Failed to generate';
+        return `- A ${p.chartType} chart titled "${p.title}" showing: ${p.explanation}. (Status: ${status})`;
+    }).join('\n');
+
+    const summaryPrompt = `Based on the research question, hypothesis, and the following visualization plan and outcomes, write a detailed summary and interpretation of the data analysis findings in Markdown format.
 - Research Question: ${context.question}
 - Hypothesis: ${context.hypothesis}
-- Visualizations Created:
-${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.explanation}`).join('\n')}
+- Visualizations Plan & Status:
+${visualizationStatusList}
+
+**IMPORTANT**: Only discuss the findings from the charts that were 'Successfully generated'. Do NOT mention or speculate about the charts that 'Failed to generate'.
 `;
     const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: summaryPrompt });
     const summary = summaryResponse.text;
 
     const finalOutput = JSON.stringify({ summary, charts: generatedCharts });
-    const logSummary = `Generated ${generatedCharts.length} charts and a summary based on the analysis plan.`;
+    const logSummary = `Analysis complete. Generated ${generatedCharts.length} of ${plan.length} planned charts and a summary.`;
 
     return { finalOutput, logSummary };
 };

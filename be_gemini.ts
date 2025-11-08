@@ -93,7 +93,7 @@ export const callGeminiWithRetry = async (
     timeout: number = 60000
 ) => {
     let attempt = 0;
-    let delay = 2000; // Start with a 2-second delay for exponential backoff
+    let delay = 30000; // Start with a 30-second delay for exponential backoff
     while (attempt < maxRetries) {
         try {
             const response = await callGeminiWithTimeout(gemini.models.generateContent({ model, ...params }), timeout);
@@ -140,7 +140,7 @@ export const callGeminiStreamWithRetry = async (
     maxRetries = 5
 ) => {
     let attempt = 0;
-    let delay = 2000;
+    let delay = 30000;
     while (attempt < maxRetries) {
         try {
             const stream = await callGeminiWithTimeout(gemini.models.generateContentStream({ model, ...params }));

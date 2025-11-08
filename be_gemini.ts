@@ -1,8 +1,5 @@
 
 
-
-
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -246,13 +243,19 @@ export const getPromptForStep = (
     switch (stepId) {
         case 1:
             expectJson = true;
-            basePrompt += `Refine the following research idea into a clear, focused, and testable research question. Also, provide a uniqueness score (0.0 to 1.0) and a brief justification. Idea: ${userInput}`;
+            basePrompt += `Refine the following research idea into a clear, focused, and testable research question. Also, provide a uniqueness score (0.0 to 1.0) and a brief justification. The research is in the field of '${context.experimentField}'. Your JSON response should include this 'field' property initialized with this value. Idea: ${userInput}`;
             config.responseMimeType = "application/json";
             config.responseSchema = RESEARCH_QUESTION_SCHEMA;
             break;
         case 2:
-            // This case is now handled by the dedicated runLiteratureReviewAgent
-            basePrompt += `For the research question "${context.question}", conduct a literature review. Find relevant, recent, and authoritative sources. Provide a comprehensive summary and a list of structured references.`;
+            // This step uses Google Search, so we can't enforce a JSON schema via responseMimeType.
+            // Instead, we instruct the AI to format its output as a raw JSON string.
+            const schemaString = JSON.stringify(LITERATURE_REVIEW_SCHEMA, null, 2);
+            basePrompt += `For the research question "${context.question}", conduct a literature review using your search tool. Find relevant, recent, and authoritative sources.
+Your final response MUST be a single, raw JSON object (no markdown backticks) that conforms to this schema:
+${schemaString}
+
+Provide a comprehensive summary and a list of structured references within that JSON structure.`;
             config.tools = [{ googleSearch: {} }];
             break;
         case 3:
@@ -305,9 +308,13 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
     updateLog('Researcher', 'Conducting initial literature search using Google Search grounding.');
     const context = getStepContext(experiment, 2);
     const { basePrompt, config } = getPromptForStep(2, '', context, experiment.fineTuneSettings[2] || {});
-    config.responseMimeType = "application/json";
-    config.responseSchema = LITERATURE_REVIEW_SCHEMA;
 
+    // Defensive fix: The Gemini API forbids using `tools` (like googleSearch) with `responseMimeType`.
+    // Although getPromptForStep(2) should not add these, we explicitly delete them here to prevent any
+    // possibility of a 400 error from a stale or mutated config object.
+    delete config.responseMimeType;
+    delete config.responseSchema;
+    
     const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: basePrompt, config }, (log) => updateLog('System', log));
     const result = response.text;
     

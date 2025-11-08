@@ -168,6 +168,10 @@ export const RESEARCH_QUESTION_SCHEMA = {
         justification: {
             type: Type.STRING,
             description: "A brief justification for the assigned uniqueness score."
+        },
+        field: {
+            type: Type.STRING,
+            description: "The scientific discipline or field of study for this research question."
         }
     },
     required: ["research_question", "uniqueness_score", "justification"]

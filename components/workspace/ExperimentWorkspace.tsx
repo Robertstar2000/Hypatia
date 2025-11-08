@@ -211,7 +211,24 @@ export const ExperimentWorkspace = () => {
                     output: finalOutput,
                     provenance: [...(currentStepData.provenance || []), { timestamp: new Date().toISOString(), prompt: basePrompt, config, output: finalOutput }]
                 };
-                await updateExperiment({ ...experimentRef.current, stepData: { ...experimentRef.current.stepData, [activeStep]: finalStepData } });
+                
+                let experimentToUpdate = { ...experimentRef.current, stepData: { ...experimentRef.current.stepData, [activeStep]: finalStepData } };
+
+                // If this was step 1, check if the AI returned a refined 'field' and update the experiment
+                if (activeStep === 1) {
+                    try {
+                        const parsed = JSON.parse(finalOutput.replace(/```json/g, '').replace(/```/g, '').trim());
+                        if (parsed.field && typeof parsed.field === 'string' && parsed.field !== experimentToUpdate.field) {
+                            experimentToUpdate.field = parsed.field;
+                            addToast(`Research field updated to "${parsed.field}" by AI.`, 'info');
+                        }
+                    } catch (e) {
+                        console.warn("Could not parse field from Step 1 output to update experiment.", e);
+                    }
+                }
+                
+                await updateExperiment(experimentToUpdate);
+
             } catch (error) {
                 const errorOutput = `Error: ${parseGeminiError(error)}`;
                 addToast(parseGeminiError(error), 'danger');

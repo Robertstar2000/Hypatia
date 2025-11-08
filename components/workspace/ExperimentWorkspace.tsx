@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useExperiment } from '../../services';
 import { useToast } from '../../toast';
-import { parseGeminiError, getStepContext, getPromptForStep, runPublicationAgent, runLiteratureReviewAgent, callGeminiWithRetry, callGeminiStreamWithRetry, runDataAnalysisAgent } from '../../services';
+import { parseGeminiError, getStepContext, getPromptForStep, runPublicationAgent, runLiteratureReviewAgent, callGeminiWithRetry, callGeminiStreamWithRetry, runDataAnalysisAgent, runPeerReviewAgent } from '../../services';
 import { WORKFLOW_STEPS } from '../../config';
 
 import { ExperimentRunner } from '../steps/runner/ExperimentRunner';
@@ -13,6 +13,7 @@ import { ProjectCompletionView } from './ProjectCompletionView';
 import { AutomationModeSelector } from './AutomationModeSelector';
 import { FineTuneModal } from './FineTuneModal';
 import { LiteratureReviewWorkspace } from '../steps/LiteratureReviewWorkspace';
+import { PeerReviewWorkspace } from '../steps/PeerReviewWorkspace';
 
 export const ExperimentWorkspace = () => {
     const { activeExperiment, updateExperiment, gemini, setActiveExperiment } = useExperiment();
@@ -89,7 +90,9 @@ export const ExperimentWorkspace = () => {
                     
                     resultText = finalOutput;
                     currentStepData = { ...currentStepData, output: resultText, suggestedInput: logSummary };
-
+                } else if (i === 9) {
+                    resultText = await runPeerReviewAgent({ experiment: currentExp, gemini, updateLog: dummyLog });
+                    currentStepData = { ...currentStepData, output: resultText };
                 } else {
                     const context = getStepContext(currentExp, i);
                     const userInput = currentExp.stepData[i]?.input || 'Proceed with generation.';
@@ -379,10 +382,11 @@ export const ExperimentWorkspace = () => {
                 {activeStep === 2 && <LiteratureReviewWorkspace onStepComplete={handleCompleteStep} />}
                 {activeStep === 6 && <ExperimentRunner onStepComplete={handleCompleteStep} />}
                 {activeStep === 7 && <DataAnalysisWorkspace onStepComplete={handleCompleteStep} />}
+                {activeStep === 9 && <PeerReviewWorkspace onStepComplete={handleCompleteStep} />}
                 {activeStep === 10 && <PublicationExporter />}
 
                 {/* Default UI for text-based steps */}
-                {activeStep !== 2 && activeStep !== 6 && activeStep !== 7 && activeStep !== 10 && (
+                {activeStep !== 2 && activeStep !== 6 && activeStep !== 7 && activeStep !== 9 && activeStep !== 10 && (
                     <GeneratedOutput
                         key={activeExperiment.id + '-' + activeStep} // Force re-render on step change
                         stepId={activeStep}
@@ -426,7 +430,7 @@ export const ExperimentWorkspace = () => {
                         )}
                         {renderStepContent()}
                     </div>
-                    {activeStep <= WORKFLOW_STEPS.length && activeExperiment.automationMode !== 'automated' && !isAutoGenerating && activeStep !== 2 && activeStep !== 6 && activeStep !== 7 && activeStep !== 10 && (
+                    {activeStep <= WORKFLOW_STEPS.length && activeExperiment.automationMode !== 'automated' && !isAutoGenerating && activeStep !== 2 && activeStep !== 6 && activeStep !== 7 && activeStep !== 9 && activeStep !== 10 && (
                          <div className="card-footer d-flex justify-content-between align-items-center bottom-nav">
                              <div>
                                 <button className="btn btn-secondary me-2" onClick={() => setFineTuneModalOpen(true)}>

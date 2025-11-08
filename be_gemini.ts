@@ -354,6 +354,7 @@ Provide a comprehensive summary and a list of structured references within that 
             basePrompt += `Based on the data analysis summary: "${context.analysis_summary}", draw conclusions for the research project. Was the hypothesis "${context.hypothesis}" supported?`;
             break;
         case 9:
+             // This step is now handled by the dedicated runPeerReviewAgent
              basePrompt += `Act as a peer reviewer. Critically review the entire research project based on this log and provide constructive feedback. Your persona is: ${settings.reviewerPersona || 'Harsh Critic'}. \n\nFULL PROJECT LOG:\n${context.full_project_summary_log}`;
              break;
         case 10:
@@ -494,6 +495,77 @@ ${plan.map(p => `- A ${p.chartType} chart titled "${p.title}" showing: ${p.expla
     const logSummary = `Generated ${generatedCharts.length} charts and a summary based on the analysis plan.`;
 
     return { finalOutput, logSummary };
+};
+
+
+/**
+ * Agentic workflow for Step 9: Peer Review Simulation.
+ * This function iterates through steps 1-8, reviewing each one individually to avoid large context windows.
+ */
+export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
+    let finalReviewDocument = `# Peer Review Simulation\n\nThis review was conducted step-by-step to provide focused feedback.\n\n`;
+    
+    // Get overarching context once
+    let researchQuestion = 'N/A';
+    try {
+        const step1Output = experiment.stepData[1]?.output;
+        if (step1Output) {
+            const step1Data = JSON.parse(step1Output.replace(/```json/g, '').replace(/```/g, '').trim());
+            researchQuestion = step1Data.research_question || 'Could not parse research question from Step 1 JSON.';
+        }
+    } catch {
+        researchQuestion = experiment.stepData[1]?.output || 'Could not parse research question.';
+    }
+
+    const hypothesis = experiment.stepData[3]?.output || 'N/A';
+
+    for (let i = 1; i <= 8; i++) {
+        const stepInfo = WORKFLOW_STEPS.find(s => s.id === i);
+        if (!stepInfo) continue;
+        
+        const stepOutput = experiment.stepData[i]?.output;
+        if (!stepOutput || stepOutput.trim() === '') {
+            finalReviewDocument += `## Step ${i}: ${stepInfo.title}\n\n*   No output was found for this step. Review skipped.\n\n`;
+            continue;
+        }
+
+        updateLog('Reviewer', `Analyzing Step ${i}: ${stepInfo.title}...`);
+        
+        const fineTuneSettings = experiment.fineTuneSettings[9] || {};
+        const persona = fineTuneSettings.reviewerPersona || 'Harsh Critic';
+        const systemInstruction = `You are an expert AI research assistant acting as a '${persona}' peer reviewer. Your task is to review a specific step of a research project.`;
+
+        const reviewPrompt = `
+Overall Research Context:
+- Research Question: ${researchQuestion}
+- Hypothesis: ${hypothesis}
+
+You are currently reviewing:
+- Step: "${stepInfo.title}"
+- Content of the step:
+---
+${stepOutput}
+---
+
+Based on this content, provide 1 to 4 concise, constructive recommendations or critiques for this specific step. Focus only on the content provided. Format your response as a bulleted list in Markdown.`;
+
+        const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { 
+            contents: reviewPrompt,
+            config: { systemInstruction } 
+        }, (log) => updateLog('System', log));
+        
+        finalReviewDocument += `## Step ${i}: ${stepInfo.title}\n\n${response.text}\n\n`;
+
+        updateLog('Reviewer', `Finished reviewing Step ${i}.`);
+        
+        // Add a delay to avoid rate limiting
+        if (i < 8) {
+            await new Promise(resolve => setTimeout(resolve, 4000));
+        }
+    }
+
+    updateLog('System', 'Full peer review complete.');
+    return finalReviewDocument;
 };
 
 

@@ -3,6 +3,8 @@
 
 
 
+
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -505,6 +507,43 @@ ${visualizationStatusList}
 
 
 /**
+ * A specialized wrapper for Gemini API calls for the Peer Review agent.
+ * Implements a patient, multi-step retry mechanism for rate limit errors.
+ * @param gemini The initialized GoogleGenAI instance.
+ * @param prompt The prompt to send to the model.
+ * @param onLog A callback for logging retry attempts.
+ * @returns The response from the Gemini API.
+ */
+const callGeminiForReviewStep = async (gemini, prompt, onLog) => {
+    const rateLimitDelays = [30000, 60000, 120000]; // 30s, 60s, 120s
+    let attempt = 0;
+
+    while (attempt <= rateLimitDelays.length) {
+        try {
+            // Use callGeminiWithTimeout to handle hangs, but retries are handled here.
+            const response = await callGeminiWithTimeout(gemini.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt }));
+            return response;
+        } catch (error) {
+            const errorMessage = error.toString();
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+
+            if (isRateLimitError && attempt < rateLimitDelays.length) {
+                const retryAfterMs = rateLimitDelays[attempt];
+                const logMessage = `Peer review call rate limit hit. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt + 1}/${rateLimitDelays.length})`;
+                if (onLog) onLog(logMessage); else console.warn(logMessage);
+                await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+                attempt++;
+            } else {
+                // For any other error, or if rate limit retries are exhausted, throw.
+                throw error;
+            }
+        }
+    }
+    throw new Error("Max retries reached for peer review step.");
+};
+
+
+/**
  * Agentic workflow for Step 9: Peer Review Simulation. Iterates through steps 2-8 for focused critiques.
  */
 export const runPeerReviewAgent = async ({ experiment, gemini, updateLog }) => {
@@ -558,12 +597,12 @@ ${documentToReview}
 3.  Focus on clarity, scientific rigor, potential weaknesses, and logical consistency.
 4.  Do NOT review any images or charts, only the text.`;
         
-        const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: prompt }, (log) => updateLog('System', log));
+        const response = await callGeminiForReviewStep(gemini, prompt, (log) => updateLog('System', log));
         const critique = response.text;
 
         finalCritique += `### Critique of Step ${stepId}: ${stepInfo.title}\n\n${critique}\n\n---\n\n`;
         updateLog('Reviewer', `Critique for Step ${stepId} complete.`);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Pause between steps
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Pause between steps
     }
     
     updateLog('System', 'All steps reviewed. Finalizing report.');

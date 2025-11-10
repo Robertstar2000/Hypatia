@@ -212,6 +212,10 @@ export const ProjectCompletionView = () => {
                 </div>
             </div>
 
+            <div className="text-center text-warning small mb-3">
+                <p className="mb-0">Although this application is effective , it uses fast mid-range Large Language Models. For professional use contact MIFECO for a much slower and significantly more expensive version that uses top frontier models.</p>
+            </div>
+
             <ul className="nav nav-tabs" id="completionTabs" role="tablist">
                 <li className="nav-item" role="presentation"><button className="nav-link active" id="pub-tab" data-bs-toggle="tab" data-bs-target="#pub-pane">Publication</button></li>
                 <li className="nav-item" role="presentation"><button className="nav-link" id="explain-tab" data-bs-toggle="tab" data-bs-target="#explain-pane">Explain</button></li>

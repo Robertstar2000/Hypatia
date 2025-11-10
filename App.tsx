@@ -153,10 +153,11 @@ export const App = () => {
 
     const updateExperiment = async (updatedExperiment: Experiment) => {
         try {
-            await db.experiments.put(updatedExperiment);
-            setExperiments(prev => prev.map(e => e.id === updatedExperiment.id ? updatedExperiment : e));
-            if (activeExperiment?.id === updatedExperiment.id) {
-                setActiveExperiment(updatedExperiment);
+            const experimentWithTimestamp = { ...updatedExperiment, updatedAt: new Date().toISOString() };
+            await db.experiments.put(experimentWithTimestamp);
+            setExperiments(prev => prev.map(e => e.id === experimentWithTimestamp.id ? experimentWithTimestamp : e));
+            if (activeExperiment?.id === experimentWithTimestamp.id) {
+                setActiveExperiment(experimentWithTimestamp);
             }
         } catch (error) {
             console.error("Failed to update experiment:", error);

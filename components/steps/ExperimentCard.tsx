@@ -31,7 +31,7 @@ export const ExperimentCard: React.FC<{
                                 <i className="bi bi-eye me-1"></i> View
                             </button>
                             <button className="btn btn-sm btn-outline-light" onClick={() => onUnarchive(exp)}>
-                                 <i className="bi bi-box-arrow-in-up me-1"></i> Unarchive
+                                 <i className="bi bi-box-arrow-in-up me-1"></i> Move to Active
                             </button>
                         </div>
                         <div className="btn-group" role="group">
@@ -51,7 +51,7 @@ export const ExperimentCard: React.FC<{
                         )}
                         <div className="d-flex justify-content-between">
                             <button className="btn btn-sm btn-outline-secondary" onClick={() => handleExport(exp)}><i className="bi bi-download me-1"></i> Export</button>
-                            <button className="btn btn-sm btn-outline-warning" onClick={() => onArchive(exp)}><i className="bi bi-archive me-1"></i> Archive</button>
+                            <button className="btn btn-sm btn-outline-warning" onClick={() => onArchive(exp)}><i className="bi bi-archive me-1"></i> Save for Later</button>
                             <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(exp.id)}><i className="bi bi-trash"></i></button>
                         </div>
                     </>

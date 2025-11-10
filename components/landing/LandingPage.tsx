@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useToast } from '../../toast';
 import { useExperiment } from '../../services';
 import { ApiKeySection } from './ApiKeySection';
@@ -9,9 +9,11 @@ import { SCIENTIFIC_FIELDS, WORKFLOW_STEPS } from '../../config';
 export const LandingPage = ({ setView }) => {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
-    const [field, setField] = useState<string>(SCIENTIFIC_FIELDS[0]);
+    const [field, setField] = useState<string>('');
     const { addToast } = useToast();
-    const { gemini, createNewExperiment, handleAuthentication } = useExperiment();
+    const { gemini, createNewExperiment, handleAuthentication, experiments, selectExperiment, deleteExperiment } = useExperiment();
+
+    const savedProjects = useMemo(() => experiments.filter(e => e.status === 'archived'), [experiments]);
 
     const handleStart = (e) => {
         e.preventDefault();
@@ -57,15 +59,16 @@ export const LandingPage = ({ setView }) => {
                                        required
                                        aria-label="Scientific Discipline"
                                    >
+                                       <option value="" disabled>Select Scientific Discipline</option>
                                        {SCIENTIFIC_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
                                    </select>
                                </div>
                                  <button type="submit" className="btn btn-primary btn-lg w-100">
                                     <i className="bi bi-play-circle me-2"></i> Begin Research
-                                </button>
+                                 </button>
                              </form>
                              <p className="mt-3 text-warning small">
-                                Be sure to read and edit AI output to keep the project aligned with your needs. Depending on project complexity, agentic AI generation can take several minutes per step—please be patient.
+                                Be sure to read and edit AI output to keep the project aligned with your needs. This tool works best for teaching, ideation, trying new ideas, creating content for grants, and proofing research projects before engaging in expensive and time-consuming research. For best results, use manual mode and review and edit each step, as that will better focus all subsequent steps. Depending on project complexity, agentic AI generation can take several minutes per step—please be patient.
                             </p>
                         </div>
                      ) : (
@@ -81,6 +84,35 @@ export const LandingPage = ({ setView }) => {
 
              <section className="landing-details-section">
                 <div className="container">
+
+                    {savedProjects.length > 0 && (
+                        <>
+                            <div className="row mb-5">
+                                <div className="col-lg-8 mx-auto">
+                                    <h2 className="section-title text-center mb-4">Load a Saved Project</h2>
+                                    <ul className="saved-project-list">
+                                        {savedProjects.map(project => (
+                                            <li key={project.id} className="saved-project-list-item">
+                                                <div>
+                                                    <h6 className="mb-0 text-primary-glow">{project.title}</h6>
+                                                    <small className="text-white-50">{project.field} - Saved on {new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</small>
+                                                </div>
+                                                <div className="btn-group">
+                                                    <button className="btn btn-sm btn-primary" onClick={() => selectExperiment(project.id)}>
+                                                        <i className="bi bi-box-arrow-in-right me-1"></i> Load
+                                                    </button>
+                                                    <button className="btn btn-sm btn-outline-danger" onClick={() => deleteExperiment(project.id)}>
+                                                        <i className="bi bi-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                            <hr className="landing-divider" />
+                        </>
+                    )}
 
                     <ResearchSummary />
                     <hr className="landing-divider" />

@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
 import { useExperiment } from '../../services';
 import { HelpModal } from './HelpModal';
+import { useToast } from '../../toast';
 
 export const Header = ({ setView, activeView, onToggleNotebook }) => {
     const [showHelp, setShowHelp] = useState(false);
-    const { gemini } = useExperiment();
+    const { gemini, activeExperiment, updateExperiment } = useExperiment();
+    const { addToast } = useToast();
 
     const handleHelpClick = (e: React.MouseEvent) => {
         e.preventDefault();
         setShowHelp(true);
+    };
+    
+    const handleSaveProject = async () => {
+        if (!activeExperiment) return;
+        try {
+            await updateExperiment({ ...activeExperiment, status: 'archived' });
+            addToast(`Project "${activeExperiment.title}" saved successfully!`, 'success');
+            setView('dashboard');
+        } catch (error) {
+            addToast('Failed to save project.', 'danger');
+        }
     };
 
     return (
@@ -29,8 +42,15 @@ export const Header = ({ setView, activeView, onToggleNotebook }) => {
                                     <span className="nav-link text-success"><i className="bi bi-check-circle-fill me-1"></i> API Connection Active</span>
                                 </li>
                             )}
-                             {activeView !== 'landing' && (
+                             {activeView !== 'landing' && gemini && (
                                 <>
+                                {activeExperiment && activeView === 'experiment' && (
+                                     <li className="nav-item">
+                                        <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); handleSaveProject(); }}>
+                                            <i className="bi bi-save-fill me-1"></i> Save Project
+                                        </a>
+                                    </li>
+                                )}
                                 <li className="nav-item">
                                     <a className="nav-link" href="#" onClick={(e) => { e.preventDefault(); onToggleNotebook(); }}>
                                         <i className="bi bi-journal-bookmark-fill me-1"></i> Lab Notebook

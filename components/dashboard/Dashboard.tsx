@@ -45,7 +45,7 @@ export const Dashboard = ({ setView }) => {
     };
     
     const handleArchive = async (exp: Experiment) => {
-        if (window.confirm("Are you sure you want to archive this project? It will be moved to a separate section.")) {
+        if (window.confirm("Are you sure you want to save this project for later? It will be moved to the saved projects list.")) {
             await updateExperiment({ ...exp, status: 'archived' });
         }
     };
@@ -83,7 +83,7 @@ export const Dashboard = ({ setView }) => {
             {archivedExperiments.length > 0 && (
                 <>
                     <hr className="my-5" />
-                    <h3 className="section-title mb-4">Archived Projects</h3>
+                    <h3 className="section-title mb-4">Saved Projects</h3>
                     <div className="row">
                         {archivedExperiments.map(exp => <ExperimentCard key={exp.id} exp={exp} isArchived={true} onArchive={handleArchive} onUnarchive={handleUnarchive} deleteExperiment={deleteExperiment} selectExperiment={selectExperiment} handleDeployClick={handleDeployClick} handleExport={handleExport} />)}
                     </div>

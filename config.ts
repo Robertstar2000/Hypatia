@@ -29,6 +29,7 @@ export interface Experiment {
     stepData: { [key: number]: StepData };
     fineTuneSettings: { [key: number]: FineTuneSettings };
     createdAt: string;
+    updatedAt?: string;
     labNotebook?: string;
     automationMode: 'manual' | 'automated' | null;
     status?: 'active' | 'archived';

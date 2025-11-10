@@ -639,6 +639,27 @@
         .completion-view-wrapper > .nav-tabs {
             flex-shrink: 0;
         }
+        /* --- STYLES FOR SAVED PROJECTS LIST --- */
+        .saved-project-list {
+            list-style: none;
+            padding: 0;
+        }
+        .saved-project-list-item {
+            background: rgba(29, 29, 48, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            transition: all 0.2s ease;
+        }
+        .saved-project-list-item:hover {
+            border-color: var(--primary-glow);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(var(--primary-glow), 0.1);
+        }
     </style>
 <script type="importmap">
 {

@@ -9,9 +9,9 @@ class ExperimentDatabase extends Dexie {
 
     constructor() {
         super("ProjectHypatiaDB");
-        (this as Dexie).version(2).stores({
-            // Schema definition: 'id' is the primary key. 'title' and 'createdAt' are indexed for faster lookups.
-            experiments: 'id, title, createdAt'
+        (this as Dexie).version(3).stores({
+            // Schema definition: 'id' is the primary key. 'title', 'createdAt', and 'updatedAt' are indexed for faster lookups.
+            experiments: 'id, title, createdAt, updatedAt'
         });
     }
 }

@@ -40,7 +40,7 @@ export interface ExperimentContextType {
     activeExperiment: Experiment | null;
     gemini: GoogleGenAI | null;
     createNewExperiment: (title: string, description: string, field: string) => Promise<void>;
-    updateExperiment: (updatedExperiment: Experiment) => Promise<void>;
+    updateExperiment: (updatedExperiment: Experiment) => Promise<Experiment>;
     deleteExperiment: (id: string) => Promise<void>;
     selectExperiment: (id: string) => void;
     setActiveExperiment: Dispatch<SetStateAction<Experiment | null>>;

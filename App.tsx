@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { Experiment } from './config';
@@ -151,7 +152,7 @@ export const App = () => {
     }
 
 
-    const updateExperiment = async (updatedExperiment: Experiment) => {
+    const updateExperiment = async (updatedExperiment: Experiment): Promise<Experiment> => {
         try {
             const experimentWithTimestamp = { ...updatedExperiment, updatedAt: new Date().toISOString() };
             await db.experiments.put(experimentWithTimestamp);
@@ -159,9 +160,11 @@ export const App = () => {
             if (activeExperiment?.id === experimentWithTimestamp.id) {
                 setActiveExperiment(experimentWithTimestamp);
             }
+            return experimentWithTimestamp;
         } catch (error) {
             console.error("Failed to update experiment:", error);
             addToast("Failed to save progress.", 'danger');
+            throw error;
         }
     };
 

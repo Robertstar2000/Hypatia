@@ -45,7 +45,7 @@ export const ExperimentWorkspace = () => {
     const runAutomationSequence = useCallback(async (startStep: number) => {
         if (!gemini) return;
         setIsAutoGenerating(true);
-        let currentExp = { ...activeExperiment };
+        let currentExp = { ...experimentRef.current };
     
         for (let i = startStep; i <= WORKFLOW_STEPS.length; i++) {
             if (currentExp.stepData[i]?.output) continue;
@@ -101,42 +101,48 @@ export const ExperimentWorkspace = () => {
                 }
                 currentExp.stepData[i] = currentStepData;
 
-                // Summarize and complete the step
-                await new Promise(resolve => setTimeout(resolve, 500)); // Add a small delay before summarizing
-                let summaryText = '';
-                const stepOutput = currentExp.stepData[i].output;
+                // For Step 10, we don't need a summary; just complete the project.
+                if (i < WORKFLOW_STEPS.length) {
+                    // Summarize and complete the step
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Add a small delay before summarizing
+                    let summaryText = '';
+                    const stepOutput = currentExp.stepData[i].output;
 
-                if (i === 1) { // Special for step 1
-                    try {
-                        const parsed = JSON.parse(stepOutput.replace(/```json/g, '').replace(/```/g, '').trim());
-                        summaryText = parsed.research_question || 'Research question formulated.';
-                    } catch {
-                        summaryText = 'Research question step completed, but could not be auto-summarized.';
-                    }
-                } else if (i === 2 || i === 7) { // Special for JSON steps 2 and 7
-                    try {
-                        const parsed = JSON.parse(stepOutput.replace(/```json/g, '').replace(/```/g, '').trim());
-                        const textToSummarize = parsed.summary;
-                        if (textToSummarize) {
-                            const summaryPrompt = `Concisely summarize the following text in 1-2 sentences for a project log:\n\n${textToSummarize}`;
-                            const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-flash-lite-latest', { contents: summaryPrompt });
-                            summaryText = summaryResponse.text;
-                        } else {
-                            summaryText = `Step ${i} completed, but the generated summary was empty.`;
+                    if (i === 1) { // Special for step 1
+                        try {
+                            const parsed = JSON.parse(stepOutput.replace(/```json/g, '').replace(/```/g, '').trim());
+                            summaryText = parsed.research_question || 'Research question formulated.';
+                        } catch {
+                            summaryText = 'Research question step completed, but could not be auto-summarized.';
                         }
-                    } catch {
-                        summaryText = `Step ${i} completed, but the output format was invalid.`;
+                    } else if (i === 2 || i === 7) { // Special for JSON steps 2 and 7
+                        try {
+                            const parsed = JSON.parse(stepOutput.replace(/```json/g, '').replace(/```/g, '').trim());
+                            const textToSummarize = parsed.summary;
+                            if (textToSummarize) {
+                                const summaryPrompt = `Concisely summarize the following text in 1-2 sentences for a project log:\n\n${textToSummarize}`;
+                                const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-flash-lite-latest', { contents: summaryPrompt });
+                                summaryText = summaryResponse.text;
+                            } else {
+                                summaryText = `Step ${i} completed, but the generated summary was empty.`;
+                            }
+                        } catch {
+                            summaryText = `Step ${i} completed, but the output format was invalid.`;
+                        }
+                    } else { // Fallback for all other steps
+                        const summaryPrompt = `Concisely summarize the following text in 1-2 sentences for a project log:\n\n${stepOutput}`;
+                        const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-flash-lite-latest', { contents: summaryPrompt });
+                        summaryText = summaryResponse.text;
                     }
-                } else { // Fallback for all other steps
-                    const summaryPrompt = `Concisely summarize the following text in 1-2 sentences for a project log:\n\n${stepOutput}`;
-                    const summaryResponse = await callGeminiWithRetry(gemini, 'gemini-flash-lite-latest', { contents: summaryPrompt });
-                    summaryText = summaryResponse.text;
+                    
+                    currentExp.stepData[i].summary = summaryText;
+                    currentExp.currentStep = i + 1;
+                } else {
+                    // This is step 10, just complete the project
+                    currentExp.currentStep = WORKFLOW_STEPS.length + 1;
                 }
-                
-                currentExp.stepData[i].summary = summaryText;
-                currentExp.currentStep = i < WORKFLOW_STEPS.length ? i + 1 : WORKFLOW_STEPS.length + 1;
     
-                await updateExperiment(currentExp); // Save after each step
+                currentExp = await updateExperiment(currentExp); // Save and get the latest state
                 
                 setIsLoading(false); // Stop loading for this step
                 await new Promise(resolve => setTimeout(resolve, 2000)); // Pause to show result
@@ -150,7 +156,7 @@ export const ExperimentWorkspace = () => {
         }
         addToast("Automated generation complete!", "success");
         setIsAutoGenerating(false);
-    }, [gemini, activeExperiment, updateExperiment, addToast]);
+    }, [gemini, updateExperiment, addToast]);
     
 
     const handleGenerate = async (regenerateFeedback = '') => {

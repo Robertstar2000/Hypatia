@@ -5,6 +5,7 @@
 
 
 
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import {
     Experiment,
@@ -370,6 +371,40 @@ Provide a comprehensive summary and a list of structured references within that 
 };
 
 /**
+ * A specialized wrapper for Gemini API calls for the Literature Review (Search) agent.
+ * Implements a patient, multi-step retry mechanism for rate limit errors.
+ * @param gemini The initialized GoogleGenAI instance.
+ * @param params The parameters for the generateContent call.
+ * @param onLog A callback for logging retry attempts.
+ * @returns The response from the Gemini API.
+ */
+const callGeminiForSearchStep = async (gemini, params, onLog) => {
+    const rateLimitDelays = [30000, 60000, 120000]; // 30s, 60s, 120s
+    let attempt = 0;
+
+    while (attempt <= rateLimitDelays.length) {
+        try {
+            const response = await callGeminiWithTimeout(gemini.models.generateContent({ model: 'gemini-2.5-flash', ...params }));
+            return response;
+        } catch (error) {
+            const errorMessage = error.toString();
+            const isRateLimitError = error.status === 'RESOURCE_EXHAUSTED' || errorMessage.includes('429') || errorMessage.toLowerCase().includes('too many requests');
+
+            if (isRateLimitError && attempt < rateLimitDelays.length) {
+                const retryAfterMs = rateLimitDelays[attempt];
+                const logMessage = `Literature review call rate limit hit. Retrying in ${retryAfterMs / 1000}s... (Attempt ${attempt + 1}/${rateLimitDelays.length})`;
+                if (onLog) onLog(logMessage); else console.warn(logMessage);
+                await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+                attempt++;
+            } else {
+                throw error;
+            }
+        }
+    }
+    throw new Error("Max retries reached for literature review search.");
+};
+
+/**
  * Agentic workflow for Step 2: Literature Review.
  */
 export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }) => {
@@ -379,12 +414,11 @@ export const runLiteratureReviewAgent = async ({ experiment, gemini, updateLog }
     const { basePrompt, config } = getPromptForStep(2, '', context, experiment.fineTuneSettings[2] || {});
 
     // Defensive fix: The Gemini API forbids using `tools` (like googleSearch) with `responseMimeType`.
-    // Although getPromptForStep(2) should not add these, we explicitly delete them here to prevent any
-    // possibility of a 400 error from a stale or mutated config object.
+    // Explicitly delete them here to prevent any possibility of a 400 error.
     delete config.responseMimeType;
     delete config.responseSchema;
     
-    const response = await callGeminiWithRetry(gemini, 'gemini-2.5-flash', { contents: basePrompt, config }, (log) => updateLog('System', log));
+    const response = await callGeminiForSearchStep(gemini, { contents: basePrompt, config }, (log) => updateLog('System', log));
     const result = response.text;
     
     updateLog('System', 'Review complete. Formatting results.');
